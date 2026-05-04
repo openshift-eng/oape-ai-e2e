@@ -1,0 +1,15 @@
+benchmark_cases:
+  - ep_url: "https://github.com/openshift/enhancements/pull/1863"
+    repo_url: "https://github.com/openshift/zero-trust-workload-identity-manager"
+    description: "SPIRE federation support"
+    implementation_prs: [68, 82]
+
+settings:
+  tools_to_benchmark:
+    - api-generate
+    - api-implement
+  iterations: 3
+  output_dir: "benchmark/results"
+  parallel: false
+  model: "claude-opus-4-6"
+  effort: "max"

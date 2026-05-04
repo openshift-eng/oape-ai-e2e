@@ -213,6 +213,23 @@ Automatically applies code fixes from a review report.
 /oape:e2e-generate main
 ```
 
+## Benchmark Pipeline
+
+The project includes a self-improving benchmark pipeline that measures and improves the quality of the OAPE code generation tools. It works by:
+
+1. Taking EPs that have already been implemented by humans
+2. Re-generating the implementation using the OAPE tools (in a bias-free environment)
+3. Comparing the output against the real merged code
+4. Iteratively improving the tool instructions based on the gaps found
+
+```bash
+# Run the benchmark feedback loop
+cd benchmark/
+python benchmark.py run --config config.yaml
+```
+
+See [benchmark/README.md](benchmark/README.md) for full documentation, including how to add your own EPs for benchmarking.
+
 ## Deployment
 
 ### Build the container images

@@ -1,0 +1,353 @@
+"""Report generation for benchmark results.
+
+Produces per-EP markdown reports and aggregate summaries.
+"""
+
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+
+from models import BenchmarkResult, GenerationResult, GroundTruth
+
+logger = logging.getLogger(__name__)
+
+
+def _repo_short_name(repo_url: str) -> str:
+    return repo_url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+
+def _ep_number(ep_url: str) -> str:
+    return ep_url.rstrip("/").split("/")[-1]
+
+
+def generate_ep_report(
+    result: BenchmarkResult,
+    gen_results: list[GenerationResult],
+    truth: GroundTruth,
+    output_dir: Path,
+) -> Path:
+    """Generate a per-EP benchmark report."""
+    repo_name = _repo_short_name(result.repo_url)
+    ep_num = _ep_number(result.ep_url)
+    report_dir = output_dir / repo_name / f"ep-{ep_num}"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = []
+    lines.append(f"# Benchmark Report: EP #{ep_num}")
+    lines.append("")
+    lines.append(f"**EP**: [{result.ep_url}]({result.ep_url})")
+    lines.append(f"**Repository**: `{result.repo_url}`")
+    lines.append(f"**Description**: {result.description}")
+    lines.append(f"**Implementation PRs**: {', '.join(f'#{pr}' for pr in result.implementation_prs)}")
+    lines.append(f"**Iterations**: {len(result.iteration_scores)}")
+    lines.append(f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    lines.append("")
+
+    is_feedback = result.mode == "feedback_loop"
+    lines.append(f"**Mode**: {'Feedback Loop (tool improved between iterations)' if is_feedback else 'Measurement (same tool each iteration)'}")
+    lines.append("")
+
+    lines.append("## Score Progression")
+    lines.append("")
+    lines.append("| Iteration | Tool Version | Completeness | Raw Precision | Adjusted Precision | Convention | Build |")
+    lines.append("|-----------|-------------|-------------|--------------|-------------------|------------|-------|")
+    for idx, s in enumerate(result.iteration_scores):
+        build = "PASS" if s.build_success else "FAIL"
+        tool_ver = gen_results[idx].tool_version if idx < len(gen_results) else "?"
+        lines.append(
+            f"| {s.iteration} | {tool_ver} | {s.completeness:.1f}% | {s.precision:.1f}% | "
+            f"{s.adjusted_precision:.1f}% | {s.convention_compliance:.1f}% | {build} |"
+        )
+    lines.append("")
+    lines.append("> **Raw Precision**: penalizes ALL extra files equally. "
+                 "**Adjusted Precision**: excludes auto-generated artifacts and formatting-only changes, "
+                 "and does not penalize valuable extra files (tests, validation, new types).")
+    lines.append("")
+
+    lines.append("### Summary")
+    lines.append("")
+    lines.append(f"- **Best Iteration**: {result.best_iteration}")
+    if len(result.iteration_scores) >= 2:
+        first = result.iteration_scores[0]
+        last = result.iteration_scores[-1]
+        lines.append(f"- **Completeness**: {first.completeness:.1f}% -> {last.completeness:.1f}% ({last.completeness - first.completeness:+.1f}%)")
+        lines.append(f"- **Adjusted Precision**: {first.adjusted_precision:.1f}% -> {last.adjusted_precision:.1f}% ({last.adjusted_precision - first.adjusted_precision:+.1f}%)")
+    total_gen_cost = sum(g.cost_usd for g in gen_results)
+    total_imp_cost = sum(imp.improvement_cost_usd for imp in result.tool_improvements)
+    lines.append(f"- **Total Cost**: ${total_gen_cost + total_imp_cost:.2f} (generation: ${total_gen_cost:.2f}, improvement: ${total_imp_cost:.2f})")
+    lines.append("")
+
+    for idx, s in enumerate(result.iteration_scores):
+        fc = s.file_classification
+        if fc.auto_generated or fc.formatting_only or fc.valuable_extra or fc.genuinely_wrong:
+            tool_ver = gen_results[idx].tool_version if idx < len(gen_results) else "?"
+            lines.append(f"### Iteration {s.iteration} ({tool_ver}) - Extra File Breakdown")
+            lines.append("")
+            if fc.auto_generated:
+                lines.append(f"**Auto-generated artifacts** ({len(fc.auto_generated)} files) -- from `make generate`/`make manifests`, not tool errors:")
+                for f in fc.auto_generated:
+                    lines.append(f"- `{f}`")
+                lines.append("")
+            if fc.formatting_only:
+                lines.append(f"**Formatting-only changes** ({len(fc.formatting_only)} files) -- whitespace/import reordering, no behavior change:")
+                for f in fc.formatting_only:
+                    lines.append(f"- `{f}`")
+                lines.append("")
+            if fc.valuable_extra:
+                lines.append(f"**Valuable extras** ({len(fc.valuable_extra)} files) -- tool generated useful code the human didn't:")
+                for f in fc.valuable_extra:
+                    lines.append(f"- `{f}`")
+                lines.append("")
+            if fc.genuinely_wrong:
+                lines.append(f"**Genuinely wrong** ({len(fc.genuinely_wrong)} files) -- files that should not have been touched:")
+                for f in fc.genuinely_wrong:
+                    lines.append(f"- `{f}`")
+                lines.append("")
+
+    if result.stable_elements or result.unstable_elements:
+        lines.append("## Consistency Analysis")
+        lines.append("")
+        if result.stable_elements:
+            lines.append(f"### Stable Elements ({len(result.stable_elements)} files produced in ALL iterations)")
+            lines.append("")
+            for el in result.stable_elements:
+                lines.append(f"- `{el}`")
+            lines.append("")
+        if result.unstable_elements:
+            lines.append(f"### Unstable Elements ({len(result.unstable_elements)} files produced in SOME iterations)")
+            lines.append("")
+            for el in result.unstable_elements:
+                lines.append(f"- `{el}`")
+            lines.append("")
+
+    if result.outperformance_findings:
+        lines.append("## Tool Outperformed Human")
+        lines.append("")
+        lines.append("Cases where the generated code was arguably better than the shipped implementation:")
+        lines.append("")
+
+        actionable = [f for f in result.outperformance_findings if f.severity == "actionable"]
+        informational = [f for f in result.outperformance_findings if f.severity == "informational"]
+
+        if actionable:
+            lines.append("### Actionable Improvements")
+            lines.append("")
+            for f in actionable:
+                lines.append(f"- **[{f.category}]** `{f.file}`: {f.description}")
+                if f.generated_snippet:
+                    lines.append(f"  - Generated: `{f.generated_snippet}`")
+                if f.truth_snippet:
+                    lines.append(f"  - Actual: `{f.truth_snippet}`")
+            lines.append("")
+
+        if informational:
+            lines.append("### Informational")
+            lines.append("")
+            for f in informational:
+                lines.append(f"- **[{f.category}]** `{f.file}`: {f.description}")
+            lines.append("")
+
+    if result.tool_improvements:
+        lines.append("## Tool Improvements Between Iterations")
+        lines.append("")
+        for imp in result.tool_improvements:
+            lines.append(f"### After Iteration {imp.iteration}")
+            lines.append("")
+            if imp.analysis_summary:
+                lines.append(f"**Analysis**: {imp.analysis_summary[:500]}")
+                lines.append("")
+            if imp.files_changed:
+                for fname, diff_text in imp.files_changed.items():
+                    added = sum(1 for l in diff_text.split("\n") if l.startswith("+") and not l.startswith("+++"))
+                    removed = sum(1 for l in diff_text.split("\n") if l.startswith("-") and not l.startswith("---"))
+                    lines.append(f"**`{fname}`** (+{added}/-{removed} lines)")
+                    lines.append("")
+                    diff_preview = diff_text[:3000]
+                    lines.append("```diff")
+                    lines.append(diff_preview)
+                    if len(diff_text) > 3000:
+                        lines.append(f"... ({len(diff_text) - 3000} more chars truncated)")
+                    lines.append("```")
+                    lines.append("")
+            else:
+                lines.append("No tool file changes in this iteration.")
+                lines.append("")
+            if imp.improvement_cost_usd > 0:
+                lines.append(f"*Improvement cost: ${imp.improvement_cost_usd:.2f}*")
+                lines.append("")
+
+    lines.append("## Ground Truth Files")
+    lines.append("")
+    if truth.files_added:
+        lines.append(f"### Added ({len(truth.files_added)})")
+        for f in truth.files_added:
+            lines.append(f"- `{f}`")
+        lines.append("")
+    if truth.files_modified:
+        lines.append(f"### Modified ({len(truth.files_modified)})")
+        for f in truth.files_modified:
+            lines.append(f"- `{f}`")
+        lines.append("")
+
+    best = next((g for g in gen_results if g.iteration == result.best_iteration), gen_results[0])
+    lines.append(f"## Best Iteration (#{best.iteration}) Files")
+    lines.append("")
+    if best.files_created:
+        lines.append(f"### Created ({len(best.files_created)})")
+        for f in best.files_created:
+            lines.append(f"- `{f}`")
+        lines.append("")
+    if best.files_modified:
+        lines.append(f"### Modified ({len(best.files_modified)})")
+        for f in best.files_modified:
+            lines.append(f"- `{f}`")
+        lines.append("")
+
+    report_path = report_dir / "report.md"
+    report_path.write_text("\n".join(lines))
+
+    json_path = report_dir / "report.json"
+    json_data = {
+        "ep_url": result.ep_url,
+        "repo_url": result.repo_url,
+        "description": result.description,
+        "implementation_prs": result.implementation_prs,
+        "median_completeness": result.median_completeness,
+        "median_precision": result.median_precision,
+        "best_iteration": result.best_iteration,
+        "score_variance": result.score_variance,
+        "iteration_scores": [
+            {
+                "iteration": s.iteration,
+                "completeness": s.completeness,
+                "precision": s.precision,
+                "adjusted_precision": s.adjusted_precision,
+                "convention_compliance": s.convention_compliance,
+                "build_success": s.build_success,
+                "file_tp": s.file_true_positives,
+                "file_fn": s.file_false_negatives,
+                "file_fp": s.file_false_positives,
+                "file_classification": {
+                    "auto_generated": s.file_classification.auto_generated,
+                    "formatting_only": s.file_classification.formatting_only,
+                    "valuable_extra": s.file_classification.valuable_extra,
+                    "genuinely_wrong": s.file_classification.genuinely_wrong,
+                },
+            }
+            for s in result.iteration_scores
+        ],
+        "outperformance_count": len(result.outperformance_findings),
+        "stable_files": len(result.stable_elements),
+        "unstable_files": len(result.unstable_elements),
+        "mode": result.mode,
+        "tool_improvements": [
+            {
+                "after_iteration": imp.iteration,
+                "files_changed": list(imp.files_changed.keys()),
+                "improvement_cost_usd": imp.improvement_cost_usd,
+            }
+            for imp in result.tool_improvements
+        ],
+    }
+    json_path.write_text(json.dumps(json_data, indent=2))
+
+    for gen in gen_results:
+        iter_dir = report_dir / f"iter-{gen.iteration}"
+        iter_dir.mkdir(parents=True, exist_ok=True)
+        (iter_dir / "diff.patch").write_text(gen.diff)
+        (iter_dir / "scores.json").write_text(json.dumps({
+            "iteration": gen.iteration,
+            "files_created": gen.files_created,
+            "files_modified": gen.files_modified,
+            "build_success": gen.build_success,
+            "cost_usd": gen.cost_usd,
+        }, indent=2))
+
+    truth_out = report_dir / "truth"
+    truth_out.mkdir(parents=True, exist_ok=True)
+    (truth_out / "combined.diff").write_text(truth.combined_diff)
+    (truth_out / "files_added.txt").write_text("\n".join(truth.files_added))
+    (truth_out / "files_modified.txt").write_text("\n".join(truth.files_modified))
+
+    for imp in result.tool_improvements:
+        imp_dir = report_dir / f"tool-improvement-after-iter-{imp.iteration}"
+        imp_dir.mkdir(parents=True, exist_ok=True)
+        for fname, diff_text in imp.files_changed.items():
+            safe_name = fname.replace("/", "__")
+            (imp_dir / f"{safe_name}.diff").write_text(diff_text)
+
+    logger.info("Report written to %s", report_path)
+    return report_path
+
+
+def generate_aggregate_report(
+    results: list[BenchmarkResult],
+    output_dir: Path,
+) -> Path:
+    """Generate an aggregate report across all benchmark cases."""
+    lines: list[str] = []
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+    lines.append("# OAPE Benchmark Aggregate Report")
+    lines.append("")
+    lines.append(f"**Generated**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    lines.append(f"**Total EPs**: {len(results)}")
+    lines.append("")
+
+    lines.append("## Summary Table")
+    lines.append("")
+    lines.append("| EP | Repo | Completeness | Precision | Best Iter | Consistency |")
+    lines.append("|----|------|-------------|-----------|-----------|-------------|")
+    for r in results:
+        ep_num = _ep_number(r.ep_url)
+        repo = _repo_short_name(r.repo_url)
+        var = r.score_variance.get("completeness", 0)
+        consistency = "High" if var < 5 else ("Medium" if var < 15 else "Low")
+        lines.append(
+            f"| #{ep_num} | {repo} | {r.median_completeness:.1f}% | "
+            f"{r.median_precision:.1f}% | {r.best_iteration} | {consistency} |"
+        )
+    lines.append("")
+
+    if len(results) > 1:
+        all_completeness = [r.median_completeness for r in results]
+        all_precision = [r.median_precision for r in results]
+        import statistics
+        lines.append("### Averages Across All EPs")
+        lines.append("")
+        lines.append(f"- **Mean Completeness**: {statistics.mean(all_completeness):.1f}%")
+        lines.append(f"- **Mean Precision**: {statistics.mean(all_precision):.1f}%")
+        lines.append("")
+
+    total_outperf = sum(len(r.outperformance_findings) for r in results)
+    if total_outperf > 0:
+        lines.append("## Tool Outperformed Human")
+        lines.append("")
+        lines.append(f"Total findings across all EPs: **{total_outperf}**")
+        lines.append("")
+
+        category_counts: dict[str, int] = {}
+        for r in results:
+            for f in r.outperformance_findings:
+                category_counts[f.category] = category_counts.get(f.category, 0) + 1
+
+        lines.append("| Category | Count |")
+        lines.append("|----------|-------|")
+        for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            lines.append(f"| {cat} | {count} |")
+        lines.append("")
+
+    lines.append("## Consistency Ranking")
+    lines.append("")
+    sorted_by_consistency = sorted(results, key=lambda r: r.score_variance.get("completeness", 0))
+    for r in sorted_by_consistency:
+        ep_num = _ep_number(r.ep_url)
+        var = r.score_variance.get("completeness", 0)
+        lines.append(f"- EP #{ep_num}: stddev={var:.2f} ({len(r.stable_elements)} stable, {len(r.unstable_elements)} unstable files)")
+    lines.append("")
+
+    report_path = output_dir / f"aggregate-{ts}.md"
+    report_path.write_text("\n".join(lines))
+    logger.info("Aggregate report written to %s", report_path)
+    return report_path
