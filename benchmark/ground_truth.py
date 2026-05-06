@@ -14,6 +14,29 @@ from models import GroundTruth, PRTimeline
 
 logger = logging.getLogger(__name__)
 
+EXCLUDED_PATH_PREFIXES = [
+    "vendor/",
+    "test/e2e/",
+    "tests/e2e/",
+    "e2e/",
+]
+
+EXCLUDED_PATH_PATTERNS = [
+    "_e2e_test.go",
+    "_e2e_suite_test.go",
+]
+
+
+def _should_exclude(filepath: str) -> bool:
+    """Check if a file should be excluded from ground truth comparison."""
+    for prefix in EXCLUDED_PATH_PREFIXES:
+        if filepath.startswith(prefix):
+            return True
+    for pattern in EXCLUDED_PATH_PATTERNS:
+        if pattern in filepath:
+            return True
+    return False
+
 
 def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     logger.debug("Running: %s", " ".join(cmd))
@@ -49,6 +72,7 @@ def extract_combined_truth(repo_url: str, timeline: PRTimeline) -> GroundTruth:
 
     files_added: list[str] = []
     files_modified: list[str] = []
+    excluded_count = 0
 
     for line in stat_result.stdout.strip().split("\n"):
         if not line.strip():
@@ -57,10 +81,16 @@ def extract_combined_truth(repo_url: str, timeline: PRTimeline) -> GroundTruth:
         if len(parts) < 2:
             continue
         status, filepath = parts[0].strip(), parts[1].strip()
+        if _should_exclude(filepath):
+            excluded_count += 1
+            continue
         if status == "A":
             files_added.append(filepath)
         elif status in ("M", "R", "C"):
             files_modified.append(filepath)
+
+    if excluded_count:
+        logger.info("Excluded %d files (vendor/, e2e tests) from ground truth", excluded_count)
 
     _run(["git", "checkout", "--quiet", final], cwd=truth_dir)
     diff_hunks: dict[str, str] = {}

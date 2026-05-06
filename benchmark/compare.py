@@ -323,13 +323,25 @@ def _detect_outperformance(
     return findings
 
 
+def _should_exclude_from_comparison(filepath: str) -> bool:
+    """Exclude vendor and e2e test files from comparison."""
+    if filepath.startswith("vendor/"):
+        return True
+    for pattern in ("test/e2e/", "tests/e2e/", "e2e/", "_e2e_test.go", "_e2e_suite_test.go"):
+        if pattern in filepath:
+            return True
+    return False
+
+
 def compare_iteration(
     gen_result: GenerationResult,
     truth: GroundTruth,
 ) -> tuple[IterationScore, list[OutperformanceFinding]]:
     """Compare a single iteration's output against ground truth."""
-    gen_all_files = set(gen_result.files_created + gen_result.files_modified)
-    truth_all_files = set(truth.files_added + truth.files_modified)
+    gen_all_files = {f for f in set(gen_result.files_created + gen_result.files_modified)
+                     if not _should_exclude_from_comparison(f)}
+    truth_all_files = {f for f in set(truth.files_added + truth.files_modified)
+                       if not _should_exclude_from_comparison(f)}
 
     go_truth_files = {f for f in truth_all_files if f.endswith(".go")}
     go_gen_files = {f for f in gen_all_files if f.endswith(".go")}
