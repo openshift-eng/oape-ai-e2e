@@ -472,6 +472,157 @@ async def improve_tool(
     )
 
 
+async def improve_tool_from_all_results(
+    results_data: list[dict],
+    truth_data: dict[str, dict],
+    iter_diffs: dict[str, str],
+    plugin_dir: str = PLUGIN_DIR,
+    backup_dir: Path | None = None,
+    model: str = "claude-opus-4-6",
+    effort: str = "max",
+) -> ToolImprovement:
+    """Analyze results from ALL EPs and make ONE set of concise improvements.
+
+    This is the Phase 2 function -- it looks at patterns across all EPs
+    and makes generic improvements, not EP-specific ones.
+    """
+    logger.info("=== Analyzing %d EP results for cross-EP patterns ===", len(results_data))
+
+    if backup_dir:
+        _backup_tool_files(plugin_dir, backup_dir, "original")
+
+    tool_contents: dict[str, str] = {}
+    for rel in TOOL_FILES:
+        path = Path(plugin_dir) / rel
+        if path.exists():
+            tool_contents[rel] = path.read_text()
+
+    ep_summaries = []
+    for rd in results_data:
+        ep_num = rd["ep_url"].rstrip("/").split("/")[-1]
+        scores = rd.get("iteration_scores", [{}])
+        s = scores[0] if scores else {}
+        fc = s.get("file_classification", {})
+
+        truth_diff = truth_data.get(ep_num, {}).get("diff_preview", "")
+        gen_diff = iter_diffs.get(ep_num, "")
+
+        ep_summaries.append(f"""
+### EP #{ep_num}: {rd.get('description', '')}
+- Repo: {rd.get('repo_url', '')}
+- Completeness: {s.get('completeness', 0):.1f}%
+- Convention: {s.get('convention_compliance', 0):.1f}%
+- Build: {"PASS" if s.get('build_success') else "FAIL"}
+- Matched: {s.get('files_matched', 0)} | Missed: {s.get('files_missed', 0)} | Wrong: {s.get('genuinely_wrong', 0)} | Extras: {s.get('valuable_extras', 0)}
+- Genuinely wrong files: {fc.get('genuinely_wrong', [])}
+- Missed ground truth files (first 15): {(rd.get('implementation_prs', []))}
+
+Ground truth diff (first 5000 chars):
+```diff
+{truth_diff}
+```
+
+Generated diff (first 5000 chars):
+```diff
+{gen_diff}
+```
+""")
+
+    tool_sections = []
+    for rel, content in tool_contents.items():
+        tool_sections.append(f"### FILE: {rel}\n```markdown\n{content}\n```")
+
+    prompt = f"""You are improving OAPE tool instructions based on benchmark results from {len(results_data)} different Enhancement Proposals across different OpenShift operators.
+
+## CRITICAL RULES
+
+1. Make GENERIC improvements only. Do NOT reference specific EP numbers, feature names, struct names, or repo names.
+2. Keep edits CONCISE. Add short rules or checklist items, not paragraphs of explanation.
+3. Each edit must address a pattern seen across MULTIPLE EPs, not just one.
+4. Do NOT bloat the files. If a 3-line rule can replace a 20-line explanation, use the 3-line rule.
+5. Preserve the existing file structure and phases.
+
+## Results from {len(results_data)} EPs
+
+{''.join(ep_summaries)}
+
+## Current Tool Instructions
+
+{chr(10).join(tool_sections)}
+
+## What to do
+
+Look at the patterns across ALL EPs:
+- What types of files are consistently missed? Add a concise rule.
+- What types of files are consistently marked "genuinely wrong"? Add a concise "do not" rule.
+- Are there common convention gaps? Add a short checklist item.
+- Are there controller patterns the tool misses? Add a brief pattern.
+
+Make your edits to the tool files. Keep them short and to the point.
+After editing, list what you changed in 2-3 bullet points.
+"""
+
+    improvement_log: list[str] = []
+    cost_usd = 0.0
+
+    try:
+        from claude_agent_sdk import (
+            query,
+            ClaudeAgentOptions,
+            AssistantMessage,
+            ResultMessage,
+            TextBlock,
+            ToolUseBlock,
+        )
+
+        options = ClaudeAgentOptions(
+            model=model,
+            effort=effort,
+            system_prompt=(
+                "You improve AI code generation tools by making concise, targeted edits. "
+                "You never add bloat. Every edit is a short rule or checklist item. "
+                "You never reference specific EPs, features, or repos."
+            ),
+            cwd=plugin_dir,
+            permission_mode="bypassPermissions",
+            allowed_tools=[
+                "Read", "Write", "Edit", "MultiEdit",
+                "Bash", "Glob", "Grep",
+            ],
+        )
+
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        improvement_log.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        improvement_log.append(f"[tool:{block.name}]")
+            elif isinstance(message, ResultMessage):
+                cost_usd = message.total_cost_usd
+                if message.result:
+                    improvement_log.append(message.result)
+
+    except ImportError:
+        logger.warning("claude_agent_sdk not available")
+        improvement_log.append("[DRY RUN]")
+    except Exception:
+        improvement_log.append(f"[ERROR] {traceback.format_exc()}")
+        logger.error("Tool improvement failed: %s", traceback.format_exc())
+
+    diffs = {}
+    if backup_dir:
+        diffs = _diff_tool_files(plugin_dir, backup_dir, "original")
+        _backup_tool_files(plugin_dir, backup_dir, "improved")
+
+    return ToolImprovement(
+        iteration=0,
+        files_changed=diffs,
+        analysis_summary="\n".join(improvement_log[-5:]) if improvement_log else "",
+        improvement_cost_usd=cost_usd,
+    )
+
+
 async def run_feedback_loop(
     ep_url: str,
     source_env: IsolatedEnv,
