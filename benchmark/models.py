@@ -89,13 +89,13 @@ class FileClassification:
 class IterationScore:
     iteration: int
     completeness: float
-    precision: float       # raw precision (all extras penalized)
-    adjusted_precision: float  # excludes auto-generated and formatting-only extras
     convention_compliance: float
     build_success: bool
-    file_true_positives: int = 0
-    file_false_negatives: int = 0
-    file_false_positives: int = 0
+    files_matched: int = 0
+    files_missed: int = 0
+    genuinely_wrong: int = 0
+    valuable_extras: int = 0
+    auto_generated: int = 0
     file_classification: FileClassification = field(default_factory=FileClassification)
 
 
@@ -112,7 +112,6 @@ class BenchmarkResult:
     score_variance: dict[str, float] = field(default_factory=dict)
     best_iteration: int = 0
     median_completeness: float = 0.0
-    median_precision: float = 0.0
     tool_improvements: list[ToolImprovement] = field(default_factory=list)
     mode: str = "feedback_loop"  # "feedback_loop" or "measurement"
 

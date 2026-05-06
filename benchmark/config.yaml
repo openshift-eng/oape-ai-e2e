@@ -1,8 +1,8 @@
 benchmark_cases:
-  - ep_url: "https://github.com/openshift/enhancements/pull/1863"
-    repo_url: "https://github.com/openshift/zero-trust-workload-identity-manager"
-    description: "SPIRE federation support"
-    implementation_prs: [68, 82]
+  - ep_url: "https://github.com/openshift/enhancements/pull/1834"
+    repo_url: "https://github.com/openshift/external-secrets-operator"
+    description: "External Secrets Operator enhancement"
+    implementation_prs: [67, 74]
 
 settings:
   tools_to_benchmark:

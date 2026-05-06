@@ -146,8 +146,9 @@ async def run_single_case(
     for s in benchmark_result.iteration_scores:
         tool_ver = gen_results[s.iteration - 1].tool_version if s.iteration <= len(gen_results) else "?"
         logger.info(
-            "  Iter %d (%s): completeness=%.1f%% precision=%.1f%% build=%s",
-            s.iteration, tool_ver, s.completeness, s.precision, s.build_success,
+            "  Iter %d (%s): completeness=%.1f%% convention=%.1f%% build=%s wrong=%d extras=%d",
+            s.iteration, tool_ver, s.completeness, s.convention_compliance,
+            s.build_success, s.genuinely_wrong, s.valuable_extras,
         )
     total_improve_cost = sum(imp.improvement_cost_usd for imp in improvements)
     total_gen_cost = sum(g.cost_usd for g in gen_results)
@@ -184,8 +185,8 @@ async def cmd_run(args: argparse.Namespace) -> None:
         for r in results:
             ep_num = r.ep_url.rstrip("/").split("/")[-1]
             logger.info(
-                "  EP #%s: completeness=%.1f%% precision=%.1f%%",
-                ep_num, r.median_completeness, r.median_precision,
+                "  EP #%s: completeness=%.1f%%",
+                ep_num, r.median_completeness,
             )
         logger.info("=" * 60)
 
@@ -209,12 +210,13 @@ async def cmd_report(args: argparse.Namespace) -> None:
             IterationScore(
                 iteration=s["iteration"],
                 completeness=s["completeness"],
-                precision=s["precision"],
                 convention_compliance=s["convention_compliance"],
                 build_success=s["build_success"],
-                file_true_positives=s.get("file_tp", 0),
-                file_false_negatives=s.get("file_fn", 0),
-                file_false_positives=s.get("file_fp", 0),
+                files_matched=s.get("files_matched", 0),
+                files_missed=s.get("files_missed", 0),
+                genuinely_wrong=s.get("genuinely_wrong", 0),
+                valuable_extras=s.get("valuable_extras", 0),
+                auto_generated=s.get("auto_generated", 0),
             )
             for s in data.get("iteration_scores", [])
         ]
@@ -225,7 +227,6 @@ async def cmd_report(args: argparse.Namespace) -> None:
             implementation_prs=data.get("implementation_prs", []),
             iteration_scores=scores,
             median_completeness=data.get("median_completeness", 0),
-            median_precision=data.get("median_precision", 0),
             best_iteration=data.get("best_iteration", 0),
             score_variance=data.get("score_variance", {}),
         ))

@@ -337,7 +337,6 @@ def compare_iteration(
     tp, fn, fp = _compute_file_metrics(go_gen_files, go_truth_files)
 
     completeness_scores: list[float] = []
-    precision_scores: list[float] = []
     convention_scores: list[float] = []
     all_outperformance: list[OutperformanceFinding] = []
 
@@ -362,15 +361,6 @@ def compare_iteration(
             + (overlap.get("field_match_rate", 0) * 0.4)
             + (overlap.get("func_match_rate", 0) * 0.2)
         )
-
-        truth_struct_names = {s["name"] for s in truth_elements.get("structs", [])}
-        gen_struct_names = {s["name"] for s in gen_elements.get("structs", [])}
-        if gen_struct_names:
-            precision_scores.append(
-                len(gen_struct_names & truth_struct_names) / len(gen_struct_names)
-            )
-        else:
-            precision_scores.append(0.0)
 
         convention_scores.append(overlap.get("marker_match_rate", 0))
 
@@ -401,64 +391,22 @@ def compare_iteration(
                         ),
                     ))
 
-    for fpath in go_gen_files - go_truth_files:
-        gen_path = gen_result.gen_dir / fpath
-        if gen_path.exists():
-            gen_content = gen_path.read_text(errors="replace")
-            gen_elements = _extract_go_elements(gen_content)
-            if gen_elements.get("structs") or gen_elements.get("functions"):
-                precision_scores.append(0.3)
-
-    genuinely_wrong_go = {f for f in classification.genuinely_wrong if f.endswith(".go")}
-    adjusted_precision_scores = list(precision_scores)
-    for fpath in go_gen_files - go_truth_files:
-        if fpath not in genuinely_wrong_go:
-            continue
-        gen_path = gen_result.gen_dir / fpath
-        if gen_path.exists():
-            gen_content = gen_path.read_text(errors="replace")
-            gen_elements = _extract_go_elements(gen_content)
-            if gen_elements.get("structs") or gen_elements.get("functions"):
-                adjusted_precision_scores.append(0.3)
-
     completeness = statistics.mean(completeness_scores) * 100 if completeness_scores else 0.0
-    precision = statistics.mean(precision_scores) * 100 if precision_scores else 0.0
     convention = statistics.mean(convention_scores) * 100 if convention_scores else 0.0
-
-    num_penalizable = len(genuinely_wrong_go)
-    total_gen_go = len(go_gen_files)
-    if total_gen_go > 0:
-        non_penalized = total_gen_go - num_penalizable
-        if matched_files:
-            raw_match_rate = statistics.mean(precision_scores) if precision_scores else 0.0
-            if non_penalized > 0:
-                adjusted_precision = (
-                    (raw_match_rate * len(matched_files) + 1.0 * len(go_gen_files - go_truth_files - genuinely_wrong_go))
-                    / (len(matched_files) + len(go_gen_files - go_truth_files - genuinely_wrong_go) + num_penalizable * 0.3)
-                ) if (len(matched_files) + len(go_gen_files - go_truth_files)) > 0 else raw_match_rate
-            else:
-                adjusted_precision = raw_match_rate
-        else:
-            adjusted_precision = 0.0
-        adjusted_precision = adjusted_precision * 100
-    else:
-        adjusted_precision = precision
 
     if not matched_files and go_truth_files:
         completeness = 0.0
-        precision = 0.0
-        adjusted_precision = 0.0
 
     score = IterationScore(
         iteration=gen_result.iteration,
         completeness=round(completeness, 1),
-        precision=round(precision, 1),
-        adjusted_precision=round(adjusted_precision, 1),
         convention_compliance=round(convention, 1),
         build_success=gen_result.build_success,
-        file_true_positives=tp,
-        file_false_negatives=fn,
-        file_false_positives=fp,
+        files_matched=tp,
+        files_missed=fn,
+        genuinely_wrong=len(classification.genuinely_wrong),
+        valuable_extras=len(classification.valuable_extra),
+        auto_generated=len(classification.auto_generated),
         file_classification=classification,
     )
 
@@ -491,14 +439,12 @@ def compare_all_iterations(
             dedup_findings.append(f)
 
     completeness_values = [s.completeness for s in all_scores]
-    precision_values = [s.precision for s in all_scores]
 
     score_variance = {}
     if len(completeness_values) > 1:
         score_variance["completeness"] = round(statistics.stdev(completeness_values), 2)
-        score_variance["precision"] = round(statistics.stdev(precision_values), 2)
 
-    best_iter = max(all_scores, key=lambda s: s.completeness + s.precision).iteration
+    best_iter = max(all_scores, key=lambda s: s.completeness - s.genuinely_wrong * 5).iteration
 
     stable: list[str] = []
     unstable: list[str] = []
@@ -528,5 +474,4 @@ def compare_all_iterations(
         score_variance=score_variance,
         best_iteration=best_iter,
         median_completeness=round(statistics.median(completeness_values), 1),
-        median_precision=round(statistics.median(precision_values), 1),
     )

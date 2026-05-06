@@ -173,11 +173,10 @@ files so it performs better on ALL future EPs -- not just this specific one.
 
 ### Scores
 - Completeness: {score.completeness:.1f}% (what % of ground truth structs/fields/functions were generated)
-- Raw Precision: {score.precision:.1f}% (penalizes ALL extra files)
-- Adjusted Precision: {score.adjusted_precision:.1f}% (excludes auto-generated artifacts and valuable extras)
 - Convention Compliance: {score.convention_compliance:.1f}%
 - Build Success: {"PASS" if score.build_success else "FAIL"}
-- Files: {score.file_true_positives} matched, {score.file_false_negatives} missed, {score.file_false_positives} extra
+- Files matched: {score.files_matched} | Files missed: {score.files_missed}
+- Genuinely wrong files: {score.genuinely_wrong} | Valuable extras: {score.valuable_extras} | Auto-generated: {score.auto_generated}
 
 ### Understanding Extra Files
 
