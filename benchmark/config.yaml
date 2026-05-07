@@ -1,15 +1,52 @@
 benchmark_cases:
+  - ep_url: "https://github.com/openshift/enhancements/pull/1863"
+    repo_url: "https://github.com/openshift/zero-trust-workload-identity-manager"
+    description: "SPIRE federation support"
+    implementation_prs: [68, 82]
+
   - ep_url: "https://github.com/openshift/enhancements/pull/1834"
     repo_url: "https://github.com/openshift/external-secrets-operator"
-    description: "External Secrets Operator enhancement"
+    description: "Network Policy for ESO"
     implementation_prs: [67, 74]
 
+  - ep_url: "https://github.com/openshift/enhancements/pull/1898"
+    repo_url: "https://github.com/openshift/external-secrets-operator"
+    description: "ESO install-time customizations"
+    implementation_prs: [91, 94, 97, 106, 111]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1914"
+    repo_url: "https://github.com/openshift/cert-manager-operator"
+    description: "TrustManager support in cert-manager"
+    implementation_prs: [362, 371, 379]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1923"
+    repo_url: "https://github.com/openshift/must-gather-operator"
+    description: "since/sinceTime fields in MustGather CR"
+    implementation_prs: [323]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1903"
+    repo_url: "https://github.com/openshift/must-gather-operator"
+    description: "Remove proxy config from MustGather CR"
+    implementation_prs: [313]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1824"
+    repo_url: "https://github.com/openshift/zero-trust-workload-identity-manager"
+    description: "OIDC discovery provider route"
+    implementation_prs: [33]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1906"
+    repo_url: "https://github.com/openshift/must-gather-operator"
+    description: "Custom image option in MustGather spec"
+    implementation_prs: [322]
+
+  - ep_url: "https://github.com/openshift/enhancements/pull/1839"
+    repo_url: "https://github.com/openshift/must-gather-operator"
+    description: "PV to persist must-gather data"
+    implementation_prs: [294]
+
+# EP #1964 excluded: openshift/must-gather is Shell-based, not a Go operator
+
 settings:
-  tools_to_benchmark:
-    - api-generate
-    - api-implement
-  iterations: 3
-  output_dir: "benchmark/results"
-  parallel: false
   model: "claude-opus-4-6"
   effort: "max"
+  output_dir: "benchmark/results"

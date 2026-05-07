@@ -161,9 +161,14 @@ async def cmd_measure(args: argparse.Namespace) -> None:
     results: list[BenchmarkResult] = []
     for i, case in enumerate(config.cases, 1):
         logger.info("\n>>> EP %d of %d <<<", i, len(config.cases))
-        result = await run_single_ep(case, config, output_dir, "measure", force=args.force)
-        if result:
-            results.append(result)
+        try:
+            result = await run_single_ep(case, config, output_dir, "measure", force=args.force)
+            if result:
+                results.append(result)
+        except Exception:
+            ep_num = _ep_num(case.ep_url)
+            logger.error("EP #%s failed, skipping: %s", ep_num, __import__("traceback").format_exc())
+            continue
 
     if results:
         logger.info("\n" + "=" * 60)
@@ -250,9 +255,14 @@ async def cmd_verify(args: argparse.Namespace) -> None:
     results: list[BenchmarkResult] = []
     for i, case in enumerate(config.cases, 1):
         logger.info("\n>>> EP %d of %d <<<", i, len(config.cases))
-        result = await run_single_ep(case, config, output_dir, "verify", force=args.force)
-        if result:
-            results.append(result)
+        try:
+            result = await run_single_ep(case, config, output_dir, "verify", force=args.force)
+            if result:
+                results.append(result)
+        except Exception:
+            ep_num = _ep_num(case.ep_url)
+            logger.error("EP #%s failed, skipping: %s", ep_num, __import__("traceback").format_exc())
+            continue
 
     if results:
         logger.info("\n" + "=" * 60)

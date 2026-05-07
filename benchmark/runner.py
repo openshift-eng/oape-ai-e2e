@@ -1,10 +1,8 @@
-"""Benchmark runner with iterative feedback loop.
+"""Benchmark runner for OAPE tools.
 
-Each iteration: generate code -> compare with ground truth -> improve the OAPE
-tool (commands/skills) -> re-generate with improved tool. The tool itself gets
-better after each iteration.
-
-All agents use claude-opus-4-6 in max effort mode.
+Provides:
+- run_single_iteration: Run OAPE tools once in an isolated environment
+- improve_tool_from_all_results: Analyze cross-EP patterns and make concise improvements
 """
 
 import json
@@ -15,8 +13,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from compare import compare_iteration
-from models import GenerationResult, GroundTruth, IsolatedEnv, IterationScore, ToolImprovement
+from models import GenerationResult, IsolatedEnv, ToolImprovement
 
 logger = logging.getLogger(__name__)
 
@@ -108,137 +105,6 @@ def _diff_tool_files(plugin_dir: str, backup_dir: Path, before_label: str) -> di
         except FileNotFoundError:
             pass
     return diffs
-
-
-def _build_improvement_prompt(
-    iteration: int,
-    score: IterationScore,
-    gen_result: GenerationResult,
-    truth: GroundTruth,
-    plugin_dir: str,
-) -> str:
-    """Build the prompt for the improver agent."""
-    tool_contents: dict[str, str] = {}
-    for rel in TOOL_FILES:
-        path = Path(plugin_dir) / rel
-        if path.exists():
-            tool_contents[rel] = path.read_text()
-
-    truth_files_summary = []
-    for f in truth.files_added[:20]:
-        truth_files_summary.append(f"  ADDED: {f}")
-    for f in truth.files_modified[:20]:
-        truth_files_summary.append(f"  MODIFIED: {f}")
-
-    gen_files_summary = []
-    for f in gen_result.files_created[:20]:
-        gen_files_summary.append(f"  CREATED: {f}")
-    for f in gen_result.files_modified[:20]:
-        gen_files_summary.append(f"  MODIFIED: {f}")
-
-    truth_diff_preview = truth.combined_diff[:12000]
-    gen_diff_preview = gen_result.diff[:12000]
-
-    fc = score.file_classification
-    classification_summary = []
-    if fc.auto_generated:
-        classification_summary.append(f"  Auto-generated artifacts (NOT errors): {fc.auto_generated}")
-    if fc.formatting_only:
-        classification_summary.append(f"  Formatting-only changes (NOT errors): {fc.formatting_only}")
-    if fc.valuable_extra:
-        classification_summary.append(f"  Valuable extras (tool outperformed human): {fc.valuable_extra}")
-    if fc.genuinely_wrong:
-        classification_summary.append(f"  GENUINELY WRONG (these are the real errors): {fc.genuinely_wrong}")
-    classification_text = chr(10).join(classification_summary) if classification_summary else "  No extra files generated."
-
-    tool_sections = []
-    for rel, content in tool_contents.items():
-        tool_sections.append(f"### FILE: {rel}\n```markdown\n{content}\n```")
-
-    return f"""You are an expert at improving AI code generation tools for OpenShift operators.
-
-You are given a comparison between what an OAPE tool generated vs what a human actually
-shipped for a specific Enhancement Proposal. Your job is to improve the tool's instruction
-files so it performs better on ALL future EPs -- not just this specific one.
-
-## CRITICAL: Make GENERIC improvements only
-
-- DO NOT add EP-specific guidance (e.g., "when generating federation support, do X").
-- DO NOT reference specific struct names, field names, or feature names from this EP.
-- DO add GENERAL PATTERNS that would have caught the issues seen here.
-- DO improve the tool's ability to discover what files to generate from ANY EP.
-- Think: "What general rule or pattern was missing that caused this gap?"
-
-## Iteration {iteration} Results
-
-### Scores
-- Completeness: {score.completeness:.1f}% (what % of ground truth structs/fields/functions were generated)
-- Convention Compliance: {score.convention_compliance:.1f}%
-- Build Success: {"PASS" if score.build_success else "FAIL"}
-- Files matched: {score.files_matched} | Files missed: {score.files_missed}
-- Genuinely wrong files: {score.genuinely_wrong} | Valuable extras: {score.valuable_extras} | Auto-generated: {score.auto_generated}
-
-### Understanding Extra Files
-
-Not all "extra" files are errors:
-
-{classification_text}
-
-Files like `zz_generated.deepcopy.go`, CRD YAMLs, `bundle.Dockerfile` are auto-generated
-by `make` commands -- generating them is CORRECT. Test files, sample configs, and dedicated
-handler files may be the tool doing BETTER than the human.
-
-Only "GENUINELY WRONG" files are actual errors.
-
-### Ground Truth (what the human produced)
-{chr(10).join(truth_files_summary)}
-
-Ground truth diff (first 12000 chars):
-```diff
-{truth_diff_preview}
-```
-
-### Generated Output (what the tool produced)
-{chr(10).join(gen_files_summary)}
-
-Generated diff (first 12000 chars):
-```diff
-{gen_diff_preview}
-```
-
-## Current OAPE Tool Instructions
-
-{chr(10).join(tool_sections)}
-
-## Your Task
-
-Identify GENERAL PATTERNS the tool is missing, then make targeted edits:
-
-### Priority 1: General patterns for missing files
-If the tool missed files (e.g., routes, validation, services, tests), add GENERIC
-rules about when an EP implies these file types are needed. Example of a good generic
-improvement: "When the EP describes exposing an endpoint, generate a routes.go file
-following the existing naming pattern in the controller package."
-
-### Priority 2: General patterns for struct/field generation
-If structs or fields don't match, improve the GENERAL conventions about how to derive
-struct shapes from EP descriptions.
-
-### Priority 3: General patterns for markers and validation
-If markers were missing, add GENERAL rules about which markers to always include.
-
-### Priority 4: General controller patterns
-If controller logic was incomplete, add GENERAL reconciliation patterns.
-
-### What NOT to do:
-- Do NOT add feature-specific rules (no "for federation..." or "for rotation...")
-- Do NOT reference specific struct/field names from this EP
-- Do NOT reduce file coverage -- generating extra tests/samples is GOOD
-- Do NOT tell the tool to skip `make generate`/`make manifests`
-- Do NOT rewrite entire files -- make surgical, targeted edits
-
-After editing, explain what GENERAL pattern you added and why.
-"""
 
 
 async def run_single_iteration(
@@ -382,96 +248,6 @@ async def run_single_iteration(
     )
 
 
-async def improve_tool(
-    iteration: int,
-    gen_result: GenerationResult,
-    truth: GroundTruth,
-    score: IterationScore,
-    plugin_dir: str = PLUGIN_DIR,
-    backup_dir: Path | None = None,
-    model: str = "claude-opus-4-6",
-    effort: str = "max",
-) -> ToolImprovement:
-    """Analyze weaknesses and edit OAPE tool files to improve next iteration."""
-    logger.info("=== Improving tool after iteration %d (model=%s, effort=%s) ===",
-                iteration, model, effort)
-
-    if backup_dir:
-        _backup_tool_files(plugin_dir, backup_dir, f"before-improvement-{iteration}")
-
-    prompt = _build_improvement_prompt(iteration, score, gen_result, truth, plugin_dir)
-    improvement_log: list[str] = []
-    cost_usd = 0.0
-
-    try:
-        from claude_agent_sdk import (
-            query,
-            ClaudeAgentOptions,
-            AssistantMessage,
-            ResultMessage,
-            TextBlock,
-            ToolUseBlock,
-        )
-
-        options = ClaudeAgentOptions(
-            model=model,
-            effort=effort,
-            system_prompt=(
-                "You are an expert at improving AI code generation tools. "
-                "You will analyze comparison results and make targeted edits to "
-                "OAPE tool instruction files (markdown) to improve code generation quality. "
-                "Focus on specific, actionable improvements. Do NOT rewrite entire files. "
-                "Make surgical edits that address observed weaknesses."
-            ),
-            cwd=plugin_dir,
-            permission_mode="bypassPermissions",
-            allowed_tools=[
-                "Read", "Write", "Edit", "MultiEdit",
-                "Bash", "Glob", "Grep",
-            ],
-        )
-
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        improvement_log.append(block.text)
-                    elif isinstance(block, ToolUseBlock):
-                        improvement_log.append(f"[tool:{block.name}]")
-            elif isinstance(message, ResultMessage):
-                cost_usd = message.total_cost_usd
-                if message.result:
-                    improvement_log.append(message.result)
-
-    except ImportError:
-        logger.warning("claude_agent_sdk not available for improvement step")
-        improvement_log.append("[DRY RUN] claude_agent_sdk not installed")
-    except Exception:
-        improvement_log.append(f"[ERROR] {traceback.format_exc()}")
-        logger.error("Tool improvement failed: %s", traceback.format_exc())
-
-    diffs = {}
-    if backup_dir:
-        diffs = _diff_tool_files(plugin_dir, backup_dir, f"before-improvement-{iteration}")
-        _backup_tool_files(plugin_dir, backup_dir, f"after-improvement-{iteration}")
-
-    if diffs:
-        logger.info("Tool improved: %d files changed", len(diffs))
-        for fname, diff in diffs.items():
-            added = sum(1 for l in diff.split("\n") if l.startswith("+") and not l.startswith("+++"))
-            removed = sum(1 for l in diff.split("\n") if l.startswith("-") and not l.startswith("---"))
-            logger.info("  %s: +%d/-%d lines", fname, added, removed)
-    else:
-        logger.info("No tool file changes detected after improvement step")
-
-    return ToolImprovement(
-        iteration=iteration,
-        files_changed=diffs,
-        analysis_summary="\n".join(improvement_log[-5:]) if improvement_log else "",
-        improvement_cost_usd=cost_usd,
-    )
-
-
 async def improve_tool_from_all_results(
     results_data: list[dict],
     truth_data: dict[str, dict],
@@ -515,7 +291,7 @@ async def improve_tool_from_all_results(
 - Build: {"PASS" if s.get('build_success') else "FAIL"}
 - Matched: {s.get('files_matched', 0)} | Missed: {s.get('files_missed', 0)} | Wrong: {s.get('genuinely_wrong', 0)} | Extras: {s.get('valuable_extras', 0)}
 - Genuinely wrong files: {fc.get('genuinely_wrong', [])}
-- Missed ground truth files (first 15): {(rd.get('implementation_prs', []))}
+- Genuinely wrong files: {fc.get('genuinely_wrong', [])}
 
 Ground truth diff (first 5000 chars):
 ```diff
@@ -623,73 +399,3 @@ After editing, list what you changed in 2-3 bullet points.
     )
 
 
-async def run_feedback_loop(
-    ep_url: str,
-    source_env: IsolatedEnv,
-    truth: GroundTruth,
-    num_iterations: int = 3,
-    plugin_dir: str = PLUGIN_DIR,
-    backup_dir: Path | None = None,
-    model: str = "claude-opus-4-6",
-    effort: str = "max",
-) -> tuple[list[GenerationResult], list[ToolImprovement]]:
-    """Run iterative feedback loop: generate -> compare -> improve -> repeat.
-
-    Each iteration uses the improved tool from the previous iteration.
-    Returns generation results and tool improvements.
-    """
-    results: list[GenerationResult] = []
-    improvements: list[ToolImprovement] = []
-
-    if backup_dir:
-        _backup_tool_files(plugin_dir, backup_dir, "original")
-
-    for i in range(1, num_iterations + 1):
-        logger.info("=" * 50)
-        logger.info("FEEDBACK LOOP: Iteration %d of %d", i, num_iterations)
-        logger.info("=" * 50)
-
-        result = await run_single_iteration(
-            ep_url, source_env, i,
-            plugin_dir=plugin_dir, model=model, effort=effort,
-        )
-        results.append(result)
-
-        score, outperf = compare_iteration(result, truth)
-        logger.info(
-            "Iteration %d scores: completeness=%.1f%% precision=%.1f%% build=%s",
-            i, score.completeness, score.precision, score.build_success,
-        )
-
-        if i < num_iterations:
-            logger.info("Analyzing weaknesses and improving tool...")
-            improvement = await improve_tool(
-                iteration=i,
-                gen_result=result,
-                truth=truth,
-                score=score,
-                plugin_dir=plugin_dir,
-                backup_dir=backup_dir,
-                model=model,
-                effort=effort,
-            )
-            improvements.append(improvement)
-            logger.info(
-                "Tool improvement complete (cost=$%.4f). %d files changed.",
-                improvement.improvement_cost_usd, len(improvement.files_changed),
-            )
-        else:
-            logger.info("Final iteration complete. No further improvements.")
-
-    if backup_dir:
-        original_dir = backup_dir / "original"
-        if original_dir.exists():
-            logger.info("Restoring original tool files...")
-            for rel in TOOL_FILES:
-                src = original_dir / rel
-                dst = Path(plugin_dir) / rel
-                if src.exists():
-                    shutil.copy2(src, dst)
-            logger.info("Original tool files restored.")
-
-    return results, improvements

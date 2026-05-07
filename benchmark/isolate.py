@@ -15,9 +15,20 @@ from models import IsolatedEnv, PRDetail, PRTimeline
 logger = logging.getLogger(__name__)
 
 
-def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], retries: int = 3, **kwargs) -> subprocess.CompletedProcess:
     logger.debug("Running: %s", " ".join(cmd))
-    return subprocess.run(cmd, capture_output=True, text=True, check=True, **kwargs)
+    for attempt in range(retries):
+        result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+        if result.returncode == 0:
+            return result
+        if attempt < retries - 1:
+            import time
+            wait = 5 * (attempt + 1)
+            logger.warning("Command failed (attempt %d/%d), retrying in %ds: %s",
+                           attempt + 1, retries, wait, result.stderr[:200])
+            time.sleep(wait)
+    result.check_returncode()
+    return result
 
 
 def _gh_json(args: list[str]) -> dict | list:
