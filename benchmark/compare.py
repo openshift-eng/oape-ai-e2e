@@ -403,11 +403,12 @@ def compare_iteration(
                         ),
                     ))
 
+    missed_go_files = go_truth_files - go_gen_files
+    for _missed in missed_go_files:
+        completeness_scores.append(0.0)
+
     completeness = statistics.mean(completeness_scores) * 100 if completeness_scores else 0.0
     convention = statistics.mean(convention_scores) * 100 if convention_scores else 0.0
-
-    if not matched_files and go_truth_files:
-        completeness = 0.0
 
     score = IterationScore(
         iteration=gen_result.iteration,

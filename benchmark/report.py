@@ -63,7 +63,7 @@ def generate_ep_report(
     lines.append("")
     lines.append("**Metric definitions:**")
     lines.append("")
-    lines.append("- **Completeness**: What % of the human's structs, fields, and functions did the tool also generate? Higher = tool covered more of the ground truth.")
+    lines.append("- **Completeness**: What % of the human's Go implementation did the tool cover? Accounts for ALL Go files in the ground truth -- matched files are scored by struct/field/function overlap, missed files count as 0%.")
     lines.append("- **Convention**: What % of kubebuilder markers (`+kubebuilder:validation:Required`, `+optional`, etc.) match between generated and ground truth?")
     lines.append("- **Build**: Did `make build` pass on the generated code?")
     lines.append("- **Matched**: Files the tool generated that also exist in the human implementation (true positives).")
