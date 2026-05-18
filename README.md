@@ -113,7 +113,7 @@ ln -s oape-ai-e2e ~/.cursor/commands/oape-ai-e2e
 
 | Plugin | Description | Commands |
 | ------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| **[oape](plugins/oape/)** | AI-driven OpenShift operator development tools | `/oape:init`, `/oape:api-generate`, `/oape:api-generate-tests`, `/oape:api-implement`, `/oape:analyze-rfe`, `/oape:e2e-generate`, `/oape:predict-regressions`, `/oape:review`, `/oape:implement-review-fixes` |
+| **[oape](plugins/oape/)** | AI-driven OpenShift operator development tools | `/oape:init`, `/oape:api-generate`, `/oape:api-generate-tests`, `/oape:api-implement`, `/oape:analyze-rfe`, `/oape:e2e-generate`, `/oape:predict-regressions`, `/oape:ci-monitor`, `/oape:review`, `/oape:implement-review-fixes` |
 
 ## Commands
 
@@ -173,6 +173,17 @@ Analyzes git diff to predict potential regressions, breaking changes, and backwa
 ```shell
 /oape:predict-regressions main
 /oape:predict-regressions origin/release-4.18 --output .reports
+```
+
+### `/oape:ci-monitor` -- Monitor CI/Prow Jobs and Analyze Failures
+
+Monitors CI checks and Prow status contexts with adaptive polling (60s/120s/60s), SHA-change tracking, retest detection, failure analysis, and optional fix-push-rewatch loop. Handles cluster-provisioning jobs (45-60 min) efficiently by backing off polling during provisioning.
+
+```shell
+/oape:ci-monitor https://github.com/openshift/cert-manager-operator/pull/101 https://github.com/openshift/cert-manager-operator/pull/102 https://github.com/openshift/cert-manager-operator/pull/103
+/oape:ci-monitor https://github.com/openshift/must-gather-operator/pull/342
+/oape:ci-monitor 101 102 103 --repo openshift/cert-manager-operator --timeout-min 120 --max-fix-rounds 2
+/oape:ci-monitor 342 --repo openshift/must-gather-operator --max-fix-rounds 0 --fast
 ```
 
 ### `/oape:review` -- Code Review Against Jira Requirements

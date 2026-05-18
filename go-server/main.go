@@ -27,6 +27,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/workflows", app.HandleListWorkflows)
 	mux.HandleFunc("GET /api/v1/workflows/{job_id}", app.HandleGetWorkflow)
 	mux.HandleFunc("POST /api/v1/workflows", app.HandleCreateWorkflow)
+	mux.HandleFunc("GET /ci-monitor", app.HandleCIMonitorPage)
+	mux.HandleFunc("POST /api/v1/ci-monitor", app.HandleCreateCIMonitor)
 	mux.HandleFunc("GET /api/v1/workflows/{job_id}/log", app.HandleWorkflowLogs)
 
 	log.Printf("Orchestrator listening on %s", cfg.ListenAddr)

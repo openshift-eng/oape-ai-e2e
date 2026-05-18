@@ -20,6 +20,7 @@ This project provides AI-driven tools for end-to-end feature development in Open
 | `/oape:analyze-rfe <rfe-key>`                                    | Analyze RFE and output EPIC, user stories, and outcomes        |
 | `/oape:e2e-generate <base-branch>`                               | Generate e2e test artifacts from git diff against base branch  |
 | `/oape:predict-regressions <base-branch>`                        | Predict API regressions and breaking changes from git diff     |
+| `/oape:ci-monitor <pr1> [pr2] [pr3] [--timeout-min N] [--max-fix-rounds N]` | Monitor CI/Prow with adaptive polling, SHA tracking, fix loop |
 | `/oape:review <ticket_id> [base_ref]`                            | Production-grade code review against Jira requirements         |
 | `/oape:implement-review-fixes <report>`                          | Automatically apply fixes from a review report                 |
 

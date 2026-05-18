@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OAPE CI Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5;
+         display: flex; justify-content: center; padding: 40px 16px; }
+  .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1);
+          padding: 32px; max-width: 800px; width: 100%; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  p.sub { color: #666; font-size: .9rem; margin-bottom: 24px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; font-size: .9rem; }
+  input[type=text] { width: 100%; padding: 10px 12px; border: 1px solid #ccc;
+                     border-radius: 6px; font-size: .95rem; }
+  input[type=text]:focus { outline: none; border-color: #4a90d9; }
+  button { margin-top: 16px; padding: 10px 24px; background: #4a90d9; color: #fff;
+           border: none; border-radius: 6px; font-size: .95rem; cursor: pointer; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  .btn-secondary { background: #6c757d; margin-left: 8px; }
+  .spinner { display: inline-block; width: 18px; height: 18px;
+             border: 3px solid #ccc; border-top-color: #4a90d9;
+             border-radius: 50%; animation: spin .8s linear infinite;
+             vertical-align: middle; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #status { margin-top: 20px; font-size: .9rem; color: #555; }
+  #logOutput { margin-top: 16px; background: #1e1e1e; color: #d4d4d4;
+            padding: 16px; border-radius: 6px; font-family: monospace;
+            font-size: .82rem; white-space: pre-wrap; word-break: break-word;
+            max-height: 600px; overflow-y: auto; display: none; }
+  .error { color: #c0392b; }
+  .workflow-info { background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 6px;
+                   padding: 12px 16px; margin-bottom: 20px; font-size: .85rem; }
+  .workflow-info h3 { font-size: .9rem; margin-bottom: 8px; color: #E65100; }
+  .workflow-info ul { margin: 0; padding-left: 20px; color: #333; }
+  .workflow-info li { margin-bottom: 4px; }
+  .field-group { margin-bottom: 14px; }
+  .field-hint { font-size: .8rem; color: #888; margin-top: 4px; }
+  .pr-inputs { display: flex; flex-direction: column; gap: 8px; }
+  .pr-row { display: flex; align-items: center; gap: 8px; }
+  .pr-row input { flex: 1; }
+  .pr-row .pr-label { font-size: .8rem; color: #666; min-width: 36px; }
+  .remove-btn { background: #e74c3c; color: #fff; border: none; border-radius: 4px;
+                padding: 6px 10px; cursor: pointer; font-size: .8rem; }
+  .remove-btn:hover { background: #c0392b; }
+  .add-btn { background: none; border: 1px dashed #4a90d9; color: #4a90d9;
+             border-radius: 6px; padding: 8px; cursor: pointer; font-size: .85rem;
+             margin-top: 4px; }
+  .add-btn:hover { background: #f0f7ff; }
+  .result-success { margin-top: 16px; background: #E8F5E9; border: 1px solid #C8E6C9;
+                    border-radius: 6px; padding: 12px 16px; font-size: .85rem;
+                    color: #2E7D32; display: none; }
+  .result-failed { margin-top: 16px; background: #FFEBEE; border: 1px solid #FFCDD2;
+                   border-radius: 6px; padding: 12px 16px; font-size: .85rem;
+                   color: #C62828; display: none; }
+  .nav { margin-bottom: 20px; }
+  .nav a { color: #4a90d9; text-decoration: none; font-size: .85rem; }
+  .nav a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="nav"><a href="/">&larr; Back to Feature Developer</a></div>
+  <h1>OAPE CI Monitor</h1>
+  <p class="sub">Monitor CI/Prow job status for pull requests with failure analysis and auto-retest</p>
+
+  <div class="workflow-info">
+    <h3>What This Does</h3>
+    <ul>
+      <li>Monitors GitHub CI checks and Prow status contexts with adaptive polling</li>
+      <li>Fetches ci-operator config for authoritative job classification</li>
+      <li>Analyzes failures with root cause tracing (PR code vs CI infra vs Vault credentials)</li>
+      <li>Auto-retests infra flakes and produces a structured report</li>
+    </ul>
+  </div>
+
+  <form id="ciForm">
+    <div class="field-group">
+      <label>Pull Request URLs</label>
+      <div class="pr-inputs" id="prInputs">
+        <div class="pr-row">
+          <span class="pr-label">PR 1</span>
+          <input type="text" name="pr_url" placeholder="https://github.com/openshift/operator-name/pull/123" required>
+        </div>
+      </div>
+      <button type="button" class="add-btn" id="addPrBtn">+ Add another PR (up to 3)</button>
+      <div class="field-hint">Provide 1-3 GitHub PR URLs. For staged OAPE workflow, use 3 PRs: API, implementation, e2e.</div>
+    </div>
+
+    <button type="submit" id="submitBtn">Start CI Monitor</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="resultSuccess" class="result-success"></div>
+  <div id="resultFailed" class="result-failed"></div>
+  <pre id="logOutput"></pre>
+</div>
+<script>
+const form      = document.getElementById('ciForm');
+const btn       = document.getElementById('submitBtn');
+const addPrBtn  = document.getElementById('addPrBtn');
+const prInputs  = document.getElementById('prInputs');
+const statusEl  = document.getElementById('status');
+const logEl     = document.getElementById('logOutput');
+const successEl = document.getElementById('resultSuccess');
+const failedEl  = document.getElementById('resultFailed');
+
+let prCount = 1;
+
+addPrBtn.addEventListener('click', () => {
+  if (prCount >= 3) return;
+  prCount++;
+  const row = document.createElement('div');
+  row.className = 'pr-row';
+  row.innerHTML = `<span class="pr-label">PR ${prCount}</span>` +
+    `<input type="text" name="pr_url" placeholder="https://github.com/openshift/operator-name/pull/456">` +
+    `<button type="button" class="remove-btn" onclick="removePr(this)">Remove</button>`;
+  prInputs.appendChild(row);
+  if (prCount >= 3) addPrBtn.style.display = 'none';
+});
+
+function removePr(btn) {
+  btn.parentElement.remove();
+  prCount--;
+  addPrBtn.style.display = '';
+  prInputs.querySelectorAll('.pr-label').forEach((el, i) => {
+    el.textContent = 'PR ' + (i + 1);
+  });
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const inputs = form.querySelectorAll('input[name="pr_url"]');
+  const prUrls = [];
+  inputs.forEach(inp => {
+    const v = inp.value.trim();
+    if (v) prUrls.push(v);
+  });
+
+  if (prUrls.length === 0) return;
+
+  btn.disabled = true;
+  logEl.style.display = 'none';
+  logEl.textContent = '';
+  successEl.style.display = 'none';
+  failedEl.style.display = 'none';
+  statusEl.innerHTML = '<span class="spinner"></span> Submitting CI monitor job\u2026';
+
+  try {
+    const body = JSON.stringify({ pr_urls: prUrls });
+    const res = await fetch('/api/v1/ci-monitor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    });
+    if (!res.ok) { throw new Error((await res.json()).detail || res.statusText); }
+    const data = await res.json();
+    const jobId = data.id;
+    statusEl.innerHTML = '<span class="spinner"></span> Connecting to log stream\u2026';
+    streamJob(jobId);
+  } catch (err) {
+    statusEl.innerHTML = '<span class="error">Error: ' + escapeHtml(err.message) + '</span>';
+    btn.disabled = false;
+  }
+});
+
+function streamJob(jobId) {
+  const es = new EventSource('/api/v1/workflows/' + jobId + '/log');
+
+  es.addEventListener('status', (e) => {
+    const data = JSON.parse(e.data);
+    const s = data.status || 'unknown';
+    const label = s.replace(/_/g, ' ');
+    statusEl.innerHTML = '<span class="spinner"></span> ' + escapeHtml(label) + '\u2026';
+  });
+
+  es.addEventListener('log', (e) => {
+    logEl.style.display = 'block';
+    logEl.textContent += e.data + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+    const line = e.data.length > 120 ? e.data.substring(0, 120) + '\u2026' : e.data;
+    statusEl.innerHTML = '<span class="spinner"></span> ' + escapeHtml(line);
+  });
+
+  es.addEventListener('complete', (e) => {
+    const result = JSON.parse(e.data);
+    es.close();
+    btn.disabled = false;
+
+    if (result.status === 'succeeded') {
+      statusEl.innerHTML = 'CI monitoring completed.';
+      successEl.textContent = 'CI monitor finished successfully. See report above.';
+      successEl.style.display = 'block';
+    } else {
+      const msg = result.message || 'unknown error';
+      statusEl.innerHTML = '<span class="error">CI monitoring failed.</span>';
+      failedEl.textContent = 'Job failed: ' + msg;
+      failedEl.style.display = 'block';
+    }
+  });
+
+  es.addEventListener('error', () => {
+    es.close();
+    btn.disabled = false;
+    if (statusEl.querySelector('.spinner')) {
+      statusEl.innerHTML = '<span class="error">Stream connection lost</span>';
+    }
+  });
+}
+</script>
+</body>
+</html>
