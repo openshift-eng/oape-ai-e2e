@@ -318,6 +318,16 @@ Exclude or handle non-CI contexts separately. Do not count these as failures:
 | `DCO` | Commit signing | Report status, do not count as CI failure |
 | `stale` | Staleness bot | Ignore entirely |
 
+### User-Defined Context Exclusions (`--ignore-context`)
+
+When `--ignore-context <pattern>` is provided (one or more times), any CI context whose name contains the pattern (case-insensitive substring match) is treated the same as `CodeRabbit` or `stale` — **ignored entirely**. The context is:
+- Excluded from the pending/running count (does not delay termination)
+- Excluded from the failure count (does not affect the verdict)
+- Not included in the Prow Job Breakdown table
+- Not fetched for evidence collection
+
+This is primarily used when the ci-monitor runs as a CI job itself, to prevent it from watching its own check (e.g., `--ignore-context oape-ci-monitor`).
+
 When `USE_RELEASE_CONTEXT=true`, also check `tests[].optional: true` from the job manifest. Optional jobs that fail are reported but do not block the overall verdict.
 
 **Severity labeling for optional jobs**: If a job is marked `optional: true`, NEVER label its failure as "Blocker" or "Critical Severity." Label it as "Non-blocking (optional)" regardless of the failure mode. Optional job failures should not change the PR's overall verdict from PASS to FAIL.
@@ -831,6 +841,24 @@ PR change context calls: <N>
 Auto-retest comment calls: <N>
 Polling rounds: <N>
 ```
+
+### Post Report as PR Comment (`--post-comment`)
+
+When `--post-comment` is set, after generating the report above, post it as a GitHub PR comment for each monitored PR:
+
+```bash
+# Only post if gh is authenticated and we have a PR number
+if [ "$POST_COMMENT" = true ]; then
+    for PR_NUMBER in "${PR_NUMBERS[@]}"; do
+        gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$REPORT"
+        echo "[ci-monitor] Posted report as comment on PR #$PR_NUMBER"
+    done
+fi
+```
+
+The full report (from `=== CI Monitor Report ===` through `API Budget`) is posted as the comment body. GitHub renders the markdown natively.
+
+If the comment exceeds GitHub's 65536 character limit, truncate the Evidence sections (keeping the Root Cause Trace and Suggested Fix for each job) and append a note: `_Report truncated. See full output in CI job logs._`
 
 ---
 

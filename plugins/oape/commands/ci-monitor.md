@@ -1,6 +1,6 @@
 ---
 description: Monitor CI/Prow job status for one or more PRs with adaptive polling, SHA-tracking, and optional fix-push-rewatch loop
-argument-hint: <pr1-url-or-number> [pr2-url-or-number] [pr3-url-or-number] [--repo <owner/name>] [--timeout-min <n>] [--max-fix-rounds <n>] [--fast] [--no-auto-retest]
+argument-hint: <pr1-url-or-number> [pr2-url-or-number] [pr3-url-or-number] [--repo <owner/name>] [--timeout-min <n>] [--max-fix-rounds <n>] [--fast] [--no-auto-retest] [--ignore-context <pattern>] [--post-comment]
 ---
 
 ## Name
@@ -72,6 +72,8 @@ Each poll iteration costs **3 GitHub API calls per active PR** (SHA check + stat
 - `--sha-settle-sec <n>` (optional): seconds to wait after detecting a SHA change before resuming polls. Default: `90`.
 - `--fast` (optional): skip deep artifact downloads (must-gather, full junit parsing). Produces a faster but shallower report.
 - `--no-auto-retest` (optional): disable automatic `/retest` posting for infra flakes. By default, when all failures on a PR are infra flakes (Mode E), the agent posts `/retest` automatically (max 2 per session).
+- `--ignore-context <pattern>` (optional, repeatable): skip CI contexts whose name contains `<pattern>` during polling. Ignored contexts are excluded from the verdict and not reported as pending/failed. Use this to prevent the ci-monitor from watching itself when running as a CI job (e.g., `--ignore-context oape-ci-monitor`). Multiple patterns can be specified by repeating the flag.
+- `--post-comment` (optional): after generating the final report, post it as a GitHub PR comment using `gh pr comment`. Requires `gh` to be authenticated with write access to the repository. When not set, the report is only printed to stdout.
 
 ## Implementation
 
@@ -114,7 +116,7 @@ fi
 
 #### Precheck 3 — Resolve Repository and PR Numbers
 
-1. Parse flags (`--repo`, `--timeout-min`, `--max-fix-rounds`, `--sha-settle-sec`, `--fast`, `--no-auto-retest`).
+1. Parse flags (`--repo`, `--timeout-min`, `--max-fix-rounds`, `--sha-settle-sec`, `--fast`, `--no-auto-retest`, `--ignore-context`, `--post-comment`).
 2. Resolve repository:
    - First from `--repo`.
    - Else from PR URL (`github.com/<owner>/<repo>/pull/<n>`).

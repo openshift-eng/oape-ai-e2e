@@ -4,7 +4,8 @@ FROM registry.access.redhat.com/ubi9/go-toolset
 USER 0
 RUN dnf install -y \
         git \
-        make && \
+        make \
+        jq && \
     # Install GitHub CLI
     dnf install -y 'dnf-command(config-manager)' && \
     dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && \
