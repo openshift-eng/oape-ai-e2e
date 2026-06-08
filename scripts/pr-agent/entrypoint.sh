@@ -24,6 +24,7 @@ PR_AGENT_MAX_PRS="${PR_AGENT_MAX_PRS:-4}"
 RATE_LIMIT_SECONDS="${RATE_LIMIT_SECONDS:-60}"
 PR_TIMEOUT_SECONDS="${PR_TIMEOUT_SECONDS:-720}"
 DRY_RUN="${DRY_RUN:-false}"
+MONITOR_ONLY="${MONITOR_ONLY:-false}"
 BOT_USER="${BOT_USER:-oape-bot[bot]}"
 GCSWEB_BASE_URL="${GCSWEB_BASE_URL:-https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com}"
 TEAM_REPOS_CSV="${REPO_ROOT}/deploy/config/team-repos.csv"
@@ -79,6 +80,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       DRY_RUN="true"
+      shift
+      ;;
+    --monitor-only)
+      MONITOR_ONLY="true"
       shift
       ;;
     *)
@@ -810,9 +815,13 @@ process_pr() {
     classify_all_failures "$OWNER" "$REPO" "$PR_NUMBER"
     echo "[PR #${PR_NUMBER}] Phase: failure analysis — completed"
 
-    echo "[PR #${PR_NUMBER}] Phase: auto-fix — started"
-    apply_trivial_fixes "$OWNER" "$REPO" "$PR_NUMBER" || true
-    echo "[PR #${PR_NUMBER}] Phase: auto-fix — completed"
+    if [[ "$MONITOR_ONLY" != "true" ]]; then
+      echo "[PR #${PR_NUMBER}] Phase: auto-fix — started"
+      apply_trivial_fixes "$OWNER" "$REPO" "$PR_NUMBER" || true
+      echo "[PR #${PR_NUMBER}] Phase: auto-fix — completed"
+    else
+      echo "[PR #${PR_NUMBER}] Phase: auto-fix — skipped (monitor-only mode)"
+    fi
   fi
 
   # Phase 3: Status Report
@@ -896,6 +905,7 @@ main() {
   echo "============================================"
   echo "  OAPE PR Lifecycle Agent — Phase 1 MVP"
   echo "  Mode: ${MODE}"
+  echo "  Monitor Only: ${MONITOR_ONLY}"
   echo "  Dry Run: ${DRY_RUN}"
   echo "  Time: $(date -u +"%Y-%m-%d %H:%M UTC")"
   echo "============================================"

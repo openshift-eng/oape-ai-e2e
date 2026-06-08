@@ -4,15 +4,21 @@ on:
   schedule:
     # Every hour, weekdays, 08:00–23:00 UTC
     - cron: '0 8-23 * * 1-5'
+  pull_request:
+    types: [opened, synchronize]
   workflow_dispatch:
     inputs:
+      pr_url:
+        type: string
+        required: false
+        description: 'PR URL to monitor (leave empty for periodic sweep of all repos)'
       dry_run:
         type: boolean
         default: false
         description: 'Run in dry-run mode (no file modifications, commits, or pushes)'
 
 concurrency:
-  group: pr-agent-periodic
+  group: pr-agent-${{ github.event.pull_request.number || inputs.pr_url || 'periodic' }}
   cancel-in-progress: false
 
 jobs:
@@ -49,7 +55,15 @@ jobs:
           CLOUD_ML_REGION: global
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-        run: scripts/pr-agent/entrypoint.sh --mode periodic
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.number }}"
+            scripts/pr-agent/entrypoint.sh --mode on-demand --pr-url "$PR_URL" --monitor-only
+          elif [[ -n "${{ inputs.pr_url }}" ]]; then
+            scripts/pr-agent/entrypoint.sh --mode on-demand --pr-url "${{ inputs.pr_url }}" --monitor-only
+          else
+            scripts/pr-agent/entrypoint.sh --mode periodic
+          fi
 
       - name: Upload Audit Log
         if: always()
