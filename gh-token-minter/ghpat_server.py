@@ -1,7 +1,12 @@
-"""Minimal HTTP server that mints GitHub App installation tokens on demand."""
+"""Mint GitHub App installation tokens — as a CLI or HTTP server.
+
+CLI:   python ghpat_server.py              # prints token to stdout
+Server: python ghpat_server.py serve       # starts HTTP server on LISTEN_PORT
+"""
 
 import json
 import os
+import sys
 import time
 
 import jwt  # pip install PyJWT cryptography
@@ -70,6 +75,10 @@ class TokenHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", LISTEN_PORT), TokenHandler)
-    print(f"[ghpat] serving on :{LISTEN_PORT}")
-    server.serve_forever()
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        server = HTTPServer(("0.0.0.0", LISTEN_PORT), TokenHandler)
+        print(f"[ghpat] serving on :{LISTEN_PORT}")
+        server.serve_forever()
+    else:
+        token, _ = mint_token()
+        print(token)
