@@ -17,7 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-//go:embed static/homepage.html
+//go:embed static/*
 var staticFS embed.FS
 
 // App holds shared dependencies for HTTP handlers.

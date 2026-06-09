@@ -4,7 +4,8 @@ FROM registry.access.redhat.com/ubi9/go-toolset
 USER 0
 RUN dnf install -y \
         git \
-        make && \
+        make \
+        jq && \
     # Install GitHub CLI
     dnf install -y 'dnf-command(config-manager)' && \
     dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && \
@@ -20,7 +21,7 @@ COPY agent/requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
 # Copy server code and config
-COPY agent/agent.py agent/main.py ./
+COPY agent/agent.py agent/main.py agent/ci_monitor.py ./
 
 # copy default config, users willing to customize should mount at runtime.
 COPY deploy/config /config
