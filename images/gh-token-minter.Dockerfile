@@ -10,4 +10,4 @@ USER 1001
 
 EXPOSE 8080
 
-CMD ["python", "ghpat_server.py"]
+CMD ["python", "ghpat_server.py", "serve"]
