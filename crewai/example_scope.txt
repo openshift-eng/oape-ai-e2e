@@ -1,0 +1,10 @@
+PROJECT_NAME=My OpenShift Operator
+REPO_URL=https://github.com/openshift/my-operator
+---
+Add a new Custom Resource and controller for the Foo resource.
+
+Requirements:
+- New CRD with spec fields: name, replicas, image.
+- Controller reconciles Foo and creates a Deployment and Service.
+- Follow controller-runtime and OpenShift API conventions.
+- Include validation (e.g. replicas > 0), finalizer for cleanup.

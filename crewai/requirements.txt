@@ -1,0 +1,7 @@
+# OAPE CrewAI workflow — project-agnostic, uses skills from plugins/oape/skills
+crewai>=0.80.0
+python-dotenv>=1.0.0
+
+# Optional: Vertex AI (set OAPE_CREWAI_USE_VERTEX=1)
+anthropic[vertex]>=0.39.0
+google-cloud-aiplatform>=1.38.0

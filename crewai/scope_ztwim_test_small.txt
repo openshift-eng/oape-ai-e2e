@@ -1,0 +1,10 @@
+PROJECT_NAME=Zero Trust Workload Identity Manager (ZTWIM)
+REPO_URL=https://github.com/anirudhAgniRedhat/openshift-zero-trust-workload-identity-manager
+---
+Small test change for OAPE workflow: add a single constant and unit test only.
+
+Scope (minimal, for testing the pipeline):
+- Add one exported constant in the ZTWIM codebase, e.g. in pkg/ or a small types file: TestFeatureFlag or OAPETestConstant = "oape-test-v1".
+- Add one unit test that asserts the constant has the expected value.
+- No CRD changes, no reconciliation logic, no new APIs. This is only to verify the OAPE workflow (design → review → tests first → implementation → compile → apply to repo) runs end-to-end in the ZTWIM repo.
+- Prefer an existing package under the repo layout; do not create many new files.

@@ -115,6 +115,10 @@ ln -s oape-ai-e2e ~/.cursor/commands/oape-ai-e2e
 | ------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
 | **[oape](plugins/oape/)** | AI-driven OpenShift operator development tools | `/oape:init`, `/oape:api-generate`, `/oape:api-generate-tests`, `/oape:api-implement`, `/oape:analyze-rfe`, `/oape:e2e-generate`, `/oape:predict-regressions`, `/oape:review`, `/oape:implement-review-fixes` |
 
+## CrewAI Multi-Agent Workflow
+
+A **project-agnostic** CrewAI setup lives in **[crewai/](crewai/)**. It runs a 9-task pipeline (design → design review → test cases → implementation outline → quality → code review → address review → write-up → customer doc) with four agents (SSE, PSE, SQE, Technical Writer). Agents take learnings from **skills** in `plugins/oape/skills/` (e.g. Effective Go). Scope is set at runtime via env or CLI—no project-specific context. See [crewai/README.md](crewai/README.md) for setup and usage.
+
 ## Commands
 
 ### `/oape:init` -- Clone an Operator Repository

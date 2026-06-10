@@ -1,0 +1,20 @@
+PROJECT_NAME=Zero Trust Workload Identity Manager (ZTWIM)
+REPO_URL=https://github.com/anirudhAgniRedhat/openshift-zero-trust-workload-identity-manager
+---
+Integration with Upstream Authority for the SPIRE server: support for cert-manager, SPIRE (nested), and Vault only.
+
+Background:
+- ZTWIM is the OpenShift Zero Trust Workload Identity Manager.
+- The feature is to add upstream authority plugin support in ZTWIM so the SPIRE server can use cert-manager, SPIRE (nested), or Vault as upstream CAs.
+- Reference: SPIRE docs for plugin_server_upstreamauthority_cert_manager, plugin_server_upstreamauthority_spire, plugin_server_upstreamauthority_vault.
+
+Requirements:
+- Design: API/CRD and operator reconciliation for the three upstream authority types (cert-manager, SPIRE, Vault).
+- The API chnages should be part of SpireServer CRD Add the changes in ztwim-repo/api/v1alpha1/spire_server_config_types.go file only do not overwrite anu existing API chnages.
+- DO NOT ADD any seperate condition API chnages for status sub resource. Use the existing conditions if there is any failure to report.
+- Do NOT WRITE tests for the API Chnages so far.
+- Scope of operator is not to create any secret if there is needed user will create the secret and give the secret reference for us.
+- Follow OpenShift and SPIRE conventions; consider security and operational concerns.
+- Test plan and test cases must be traceable to the design and to each upstream authority variant.
+- Implementation outline should cover files/packages to add or modify, reconciliation logic, and unit test plan—no full code, outline only.
+- Documentation must support customer-facing steps: configuration, verification, troubleshooting for each upstream authority option.
