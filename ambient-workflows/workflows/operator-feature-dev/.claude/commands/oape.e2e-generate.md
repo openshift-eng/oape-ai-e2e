@@ -1,0 +1,1 @@
+../../../../../plugins/oape/commands/e2e-generate.md

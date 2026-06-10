@@ -1,0 +1,1 @@
+../../../../../../plugins/oape/skills/effective-go/SKILL.md
