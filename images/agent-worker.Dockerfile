@@ -19,15 +19,13 @@ WORKDIR /app
 COPY agent/requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
-# Copy server code and config
-COPY agent/agent.py agent/main.py ./
+# Copy agent code
+COPY agent/ ./
 
 # copy default config, users willing to customize should mount at runtime.
 COPY deploy/config /config
 
-# Copy plugins directory
-# server.py resolves: Path(__file__).parent.parent / "plugins" / "oape"
-# With __file__=/app/server.py, parent.parent=/, so it expects /plugins/oape
+# Copy plugins directory (agent/config.py resolves /plugins/oape as absolute path)
 COPY plugins /plugins
 
 # Configure git globally while still root, and ensure the home directory is

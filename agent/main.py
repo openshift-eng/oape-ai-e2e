@@ -6,13 +6,12 @@ as JSON (one message per line), which the orchestrator streams as pod logs.
 """
 
 import asyncio
-import json
 import os
 import sys
 
 from rich import print_json
 
-from agent import run_workflow
+from phases import run_workflow
 
 
 async def main():
