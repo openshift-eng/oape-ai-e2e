@@ -5,6 +5,7 @@ Uses the Claude Agent SDK to orchestrate a sequence of OAPE skills that:
 1. PR #1: init → api-generate → api-generate-tests → review-and-fix → raise PR
 2. PR #2: api-implement → review-and-fix → raise PR
 3. PR #3: e2e-generate → review-and-fix → raise PR
+4. CI stage: monitor PR checks and analyze likely fixes for failures
 """
 
 import csv
@@ -94,6 +95,11 @@ Branch: `feature/api-types-<ep-number>`
 6. Run `/oape:review OCPBUGS-0 {repo_info['base_branch']}` to review and auto-fix issues
 7. Commit all changes with a descriptive message
 8. Push the branch and create a PR against `{repo_info['base_branch']}`
+9. Run `/oape:ci-monitor <pr1-url> --timeout-min 120 --max-fix-rounds 2`
+   - ci-monitor uses adaptive polling (60s for fast jobs, 120s during cluster provisioning)
+   - If CI fails with a fixable error (build/lint/test), apply the fix, push, and ci-monitor re-polls automatically
+   - If CI fails with infra flake or repo-wide issue, report it and continue to PR #2
+   - If max-fix-rounds (2) exhausted, report and continue
 
 ### PR #2: Controller Implementation
 Branch: `feature/controller-impl-<ep-number>`
@@ -103,6 +109,8 @@ Branch: `feature/controller-impl-<ep-number>`
 4. Run `/oape:review OCPBUGS-0 {repo_info['base_branch']}` to review and auto-fix issues
 5. Commit all changes with a descriptive message
 6. Push the branch and create a PR against `{repo_info['base_branch']}`
+7. Run `/oape:ci-monitor <pr2-url> --timeout-min 120 --max-fix-rounds 2`
+   - Same adaptive polling and fix loop as PR #1
 
 ### PR #3: E2E Tests
 Branch: `feature/e2e-tests-<ep-number>`
@@ -111,6 +119,8 @@ Branch: `feature/e2e-tests-<ep-number>`
 3. Run `/oape:review OCPBUGS-0 {repo_info['base_branch']}` to review and auto-fix issues
 4. Commit all changes with a descriptive message
 5. Push the branch and create a PR against `{repo_info['base_branch']}`
+6. Run `/oape:ci-monitor <pr3-url> --timeout-min 120 --max-fix-rounds 2`
+   - Same adaptive polling and fix loop as PR #1
 
 ## Execution Instructions
 
@@ -120,6 +130,11 @@ Branch: `feature/e2e-tests-<ep-number>`
 4. For the review step, the `/oape:review` command will automatically apply fixes
 5. When creating PRs, use `gh pr create` with descriptive titles and bodies
 6. Report the PR URL after each PR is created
+7. The `/oape:ci-monitor` call handles the full CI watch + fix loop autonomously:
+   - It uses adaptive intervals (60s/120s/60s) to minimize API usage
+   - It detects SHA changes from pushes and retests automatically
+   - It applies fixes and re-polls up to 2 times before giving up
+   - It reports infra flakes as non-fixable and continues
 
 ## CRITICAL: Fully Autonomous Execution
 

@@ -139,6 +139,30 @@ Analyzes git diff to predict potential regressions, breaking changes, and backwa
 
 ---
 
+### `/oape:ci-monitor`
+
+Monitors CI checks and Prow status contexts for one or more PRs using **adaptive polling** (60s/120s/60s), tracks SHA changes and retests, downloads GCS artifacts, classifies failure modes, cross-references Sippy for flake detection, and optionally applies fixes and re-watches CI in a loop. Supports the staged PR #1/#2/#3 workflow and any OpenShift PR with Prow presubmits.
+
+**Usage:**
+```shell
+/oape:ci-monitor <pr1-url-or-number> [pr2-url-or-number] [pr3-url-or-number]
+/oape:ci-monitor https://github.com/openshift/must-gather-operator/pull/342
+/oape:ci-monitor 101 102 103 --repo openshift/cert-manager-operator --timeout-min 120 --max-fix-rounds 2
+/oape:ci-monitor 342 --repo openshift/must-gather-operator --max-fix-rounds 0 --fast
+```
+
+**What it does:**
+1. **Prechecks** -- Validates PR inputs, required tools (`gh`, `jq`, `git`), and GitHub authentication.
+2. **Adaptive Polling** -- Polls at 60s for fast jobs (lint/unit), backs off to 120s during cluster provisioning (saves ~44% API calls), tightens to 60s when approaching completion. Auto-adjusts timeout based on detected job mix (30/60/120 min).
+3. **SHA-Anchored Monitoring** -- Tracks HEAD SHA on every poll. Detects new commits (clears stale results, waits 90s settle) and `/retest` commands (detects via `started_at` timestamp changes).
+4. **Artifact Collection** -- Downloads `build-log.txt`, `finished.json`, and `junit*.xml` from GCS for each failed Prow job. Detects `must-gather.tar` availability for e2e jobs.
+5. **Failure Mode Classification** -- Classifies each failure as install, test, build/compile, lint/boilerplate, or infrastructure flake.
+6. **Sippy Flake Detection** -- Queries Sippy for historical pass rates and open bugs.
+7. **Fix-Push-Rewatch Loop** -- When `--max-fix-rounds > 0`, applies fixes for build/lint/test failures, pushes, and re-polls (up to 2 rounds by default). Never auto-fixes install failures or infra flakes.
+8. **Stage-Aware Summary** -- Highlights cross-stage dependencies between API, implementation, and e2e PRs.
+
+---
+
 ### `/oape:review`
 
 Performs a "Principal Engineer" level code review that verifies code changes against Jira requirements.
