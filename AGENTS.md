@@ -4,7 +4,7 @@ This document provides context for AI agents when working with the OAPE AI E2E F
 
 ## Purpose
 
-This project provides AI-driven tools for end-to-end feature development in OpenShift operators. The workflow takes an Enhancement Proposal (EP) and/or design document (gist) and generates:
+This project provides AI-driven tools for end-to-end feature development in OpenShift operators. The workflow takes an Enhancement Proposal (EP), design document (gist), and/or Jira ticket and generates:
 1. API type definitions (Go structs)
 2. Integration tests for the API types
 3. Controller/reconciler implementation code
@@ -14,9 +14,9 @@ This project provides AI-driven tools for end-to-end feature development in Open
 | Command                                                          | Purpose                                                        |
 | ---------------------------------------------------------------- | -------------------------------------------------------------- |
 | `/oape:init <git-url> <base-branch>`                             | Clone a Git repository and checkout the base branch            |
-| `/oape:api-generate <EP-URL> [--design-doc <GIST-URL>]`          | Generate Go API types from EP and/or design doc                |
+| `/oape:api-generate <EP-URL> [--design-doc <GIST-URL>] [--jira <TICKET>]` | Generate Go API types from EP, design doc, and/or Jira ticket |
 | `/oape:api-generate-tests <path>`                                | Generate integration test suites for API types                 |
-| `/oape:api-implement <EP-URL> [--design-doc <GIST-URL>]`         | Generate controller code from EP and/or design doc + API types |
+| `/oape:api-implement <EP-URL> [--design-doc <GIST-URL>] [--jira <TICKET>]` | Generate controller code from EP, design doc, and/or Jira ticket + API types |
 | `/oape:analyze-rfe <rfe-key>`                                    | Analyze RFE and output EPIC, user stories, and outcomes        |
 | `/oape:e2e-generate <base-branch>`                               | Generate e2e test artifacts from git diff against base branch  |
 | `/oape:predict-regressions <base-branch>`                        | Predict API regressions and breaking changes from git diff     |
@@ -31,9 +31,13 @@ These commands support flexible input sources:
 | -------------------- | ---------------------------------------------------------------------------------- |
 | EP only              | `/oape:api-generate https://github.com/openshift/enhancements/pull/1234`           |
 | Design doc only      | `/oape:api-generate --design-doc https://gist.github.com/user/abc123`              |
+| Jira ticket only     | `/oape:api-generate --jira OCPBUGS-12345`                                          |
+| Jira ticket (URL)    | `/oape:api-generate --jira https://issues.redhat.com/browse/OCPBUGS-12345`         |
 | EP + Design doc      | `/oape:api-generate https://github.com/openshift/enhancements/pull/1234 --design-doc https://gist.github.com/user/abc123` |
+| EP + Jira ticket     | `/oape:api-generate https://github.com/openshift/enhancements/pull/1234 --jira OCPBUGS-12345` |
+| All three sources    | `/oape:api-generate https://github.com/openshift/enhancements/pull/1234 --design-doc https://gist.github.com/user/abc123 --jira OCPBUGS-12345` |
 
-When both sources are provided, the design document takes precedence for implementation details while the EP provides high-level context.
+When multiple sources are provided, precedence is: design document > Jira ticket > EP. The design document provides exact implementation details, the Jira ticket provides specific requirements and acceptance criteria, and the EP provides high-level context.
 
 ## Typical Workflow
 
@@ -47,6 +51,12 @@ When both sources are provided, the design document takes precedence for impleme
 # 2b. Or generate API types with a detailed design document
 /oape:api-generate https://github.com/openshift/enhancements/pull/XXXX --design-doc https://gist.github.com/user/my-design-doc
 
+# 2c. Or generate API types from a Jira ticket
+/oape:api-generate --jira OCPBUGS-12345
+
+# 2d. Or combine Jira ticket with EP for richer context
+/oape:api-generate https://github.com/openshift/enhancements/pull/XXXX --jira OCPBUGS-12345
+
 # 3. Generate integration tests for the API types
 /oape:api-generate-tests api/v1alpha1/
 
@@ -58,6 +68,9 @@ When both sources are provided, the design document takes precedence for impleme
 
 # 5b. Or generate with detailed design document
 /oape:api-implement https://github.com/openshift/enhancements/pull/XXXX --design-doc https://gist.github.com/user/my-design-doc
+
+# 5c. Or generate from a Jira ticket
+/oape:api-implement --jira OCPBUGS-12345
 
 # 6. Build and verify
 make generate && make manifests && make build && make test
@@ -131,6 +144,7 @@ Before running commands, ensure:
 - **go** - Go toolchain installed
 - **git** - Git installed
 - **make** - Make installed
+- **JIRA_PERSONAL_TOKEN** - Personal access token for Jira REST API (required when using `--jira` flag with api-generate or api-implement)
 
 ---
 

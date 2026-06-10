@@ -26,17 +26,20 @@ Clones an OpenShift operator git repository by URL into the current directory an
 
 ### `/oape:api-generate`
 
-Reads an OpenShift enhancement proposal PR, extracts the required API changes, and generates compliant Go type definitions in the correct paths of the current OpenShift operator repository.
+Reads an OpenShift enhancement proposal PR, design document (gist), and/or Jira ticket, extracts the required API changes, and generates compliant Go type definitions in the correct paths of the current OpenShift operator repository.
 
 **Usage:**
 ```shell
 /oape:api-generate https://github.com/openshift/enhancements/pull/1234
+/oape:api-generate --jira OCPBUGS-12345
+/oape:api-generate https://github.com/openshift/enhancements/pull/1234 --jira OCPBUGS-12345
+/oape:api-generate https://github.com/openshift/enhancements/pull/1234 --design-doc https://gist.github.com/user/abc123 --jira OCPBUGS-12345
 ```
 
 **What it does:**
-1. **Prechecks** -- Validates the PR URL, required tools (`gh`, `go`, `git`), GitHub authentication, repository type (must be an OpenShift operator repo with `openshift/api` dependency), and PR accessibility. Fails immediately if any precheck fails.
+1. **Prechecks** -- Validates the PR URL/Jira ticket key, required tools (`gh`, `go`, `git`), GitHub authentication, repository type (must be an OpenShift operator repo with `openshift/api` dependency), and input source accessibility. Fails immediately if any precheck fails.
 2. **Knowledge Refresh** -- Fetches and internalizes the latest OpenShift and Kubernetes API conventions before generating any code.
-3. **Enhancement Analysis** -- Reads the enhancement proposal to extract API group, version, kinds, fields, validation requirements, feature gate info, and whether it is a configuration or workload API.
+3. **Input Analysis** -- Reads the enhancement proposal, Jira ticket, and/or design document to extract API group, version, kinds, fields, validation requirements, feature gate info, and whether it is a configuration or workload API.
 4. **Code Generation** -- Generates or modifies Go type definitions following conventions derived from the authoritative documents and patterns from the existing codebase.
 5. **FeatureGate Registration** -- Adds FeatureGate to `features.go` when applicable.
 
@@ -57,17 +60,19 @@ Generates `.testsuite.yaml` integration test files for OpenShift API type defini
 
 ### `/oape:api-implement`
 
-Reads an OpenShift enhancement proposal PR, extracts the required implementation logic, and generates complete controller/reconciler code following controller-runtime and operator-sdk conventions.
+Reads an OpenShift enhancement proposal PR, design document (gist), and/or Jira ticket, extracts the required implementation logic, and generates complete controller/reconciler code following controller-runtime and operator-sdk conventions.
 
 **Usage:**
 ```shell
 /oape:api-implement https://github.com/openshift/enhancements/pull/1234
+/oape:api-implement --jira OCPBUGS-12345
+/oape:api-implement https://github.com/openshift/enhancements/pull/1234 --jira OCPBUGS-12345
 ```
 
 **What it does:**
-1. **Prechecks** -- Validates the PR URL, required tools (`gh`, `go`, `git`, `make`), GitHub authentication, repository type (controller-runtime or library-go), and PR accessibility.
+1. **Prechecks** -- Validates the PR URL/Jira ticket key, required tools (`gh`, `go`, `git`, `make`), GitHub authentication, repository type (controller-runtime or library-go), and input source accessibility.
 2. **Knowledge Refresh** -- Fetches and internalizes the latest controller-runtime patterns and operator best practices.
-3. **Enhancement Analysis** -- Reads the enhancement proposal to extract business logic requirements, reconciliation workflow, conditions, events, and error handling.
+3. **Input Analysis** -- Reads the enhancement proposal, Jira ticket, and/or design document to extract business logic requirements, reconciliation workflow, conditions, events, and error handling.
 4. **Pattern Detection** -- Identifies the controller layout pattern used in the repository.
 5. **Code Generation** -- Generates complete Reconcile() logic, SetupWithManager, finalizer handling, status updates, and event recording.
 6. **Controller Registration** -- Adds the new controller to the manager.
@@ -95,8 +100,9 @@ Analyzes a Jira Request for Enhancement (RFE) and generates a structured breakdo
 # Clone the operator repository (if not already cloned)
 /oape:init cert-manager-operator
 
-# Generate the API types
+# Generate the API types (from EP, Jira ticket, or both)
 /oape:api-generate https://github.com/openshift/enhancements/pull/1234
+/oape:api-generate --jira OCPBUGS-12345
 
 # Generate integration tests for the new types
 /oape:api-generate-tests api/v1alpha1/myresource_types.go
@@ -200,7 +206,7 @@ See [e2e-test-generator/](e2e-test-generator/) for fixture templates and pattern
 - **gh** (GitHub CLI) -- installed and authenticated (for api-generate, api-implement, review)
 - **make** -- Make (for api-implement)
 - **curl** -- For fetching Jira issues (for review, analyze-rfe)
-- **JIRA_PERSONAL_TOKEN** -- For analyze-rfe (Jira REST API)
+- **JIRA_PERSONAL_TOKEN** -- For api-generate/api-implement with `--jira` flag, and for analyze-rfe (Jira REST API)
 - **oc** -- OpenShift CLI (recommended, for running generated execution steps)
 - Must be run from within an OpenShift operator repository
 

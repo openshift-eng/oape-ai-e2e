@@ -45,6 +45,8 @@ type WorkflowParams struct {
 	EPUrl            string
 	RepoURL          string
 	BaseBranch       string
+	DesignDocURL     string
+	JiraTicket       string
 	WorkerImage      string
 	EnvConfigMap     string
 	GCloudSecret     string
@@ -91,9 +93,11 @@ func (c *K8sClient) CreateWorkflowJob(ctx context.Context, jobID string, params 
 				"job-id": jobID,
 			},
 			Annotations: map[string]string{
-				"app-platform-shift.openshift.github.io/repo-url":    params.RepoURL,
-				"app-platform-shift.openshift.github.io/ep-url":      params.EPUrl,
-				"app-platform-shift.openshift.github.io/base-branch": params.BaseBranch,
+				"app-platform-shift.openshift.github.io/repo-url":       params.RepoURL,
+				"app-platform-shift.openshift.github.io/ep-url":         params.EPUrl,
+				"app-platform-shift.openshift.github.io/base-branch":    params.BaseBranch,
+				"app-platform-shift.openshift.github.io/design-doc-url": params.DesignDocURL,
+				"app-platform-shift.openshift.github.io/jira-ticket":    params.JiraTicket,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -117,6 +121,8 @@ func (c *K8sClient) CreateWorkflowJob(ctx context.Context, jobID string, params 
 								{Name: "EP_URL", Value: params.EPUrl},
 								{Name: "REPO_URL", Value: params.RepoURL},
 								{Name: "BASE_BRANCH", Value: params.BaseBranch},
+								{Name: "DESIGN_DOC_URL", Value: params.DesignDocURL},
+								{Name: "JIRA_TICKET", Value: params.JiraTicket},
 								{Name: "PYTHONUNBUFFERED", Value: "1"},
 								{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: "/secrets/gcloud/application_default_credentials.json"},
 							},
@@ -248,13 +254,15 @@ func (c *K8sClient) StreamPodLogs(ctx context.Context, podName string, follow bo
 
 // JobInfo contains extended job information from K8s.
 type JobInfo struct {
-	ID         string
-	Status     string
-	Message    string
-	CreatedAt  string
-	RepoURL    string
-	EPUrl      string
-	BaseBranch string
+	ID           string
+	Status       string
+	Message      string
+	CreatedAt    string
+	RepoURL      string
+	EPUrl        string
+	BaseBranch   string
+	DesignDocURL string
+	JiraTicket   string
 }
 
 // ListJobs returns all workflow jobs with app=shift-worker label.
@@ -303,6 +311,8 @@ func (c *K8sClient) ListJobs(ctx context.Context) ([]JobInfo, error) {
 			info.RepoURL = job.Annotations["app-platform-shift.openshift.github.io/repo-url"]
 			info.EPUrl = job.Annotations["app-platform-shift.openshift.github.io/ep-url"]
 			info.BaseBranch = job.Annotations["app-platform-shift.openshift.github.io/base-branch"]
+			info.DesignDocURL = job.Annotations["app-platform-shift.openshift.github.io/design-doc-url"]
+			info.JiraTicket = job.Annotations["app-platform-shift.openshift.github.io/jira-ticket"]
 		}
 
 		result = append(result, info)
@@ -349,6 +359,8 @@ func (c *K8sClient) GetJobInfo(ctx context.Context, jobID string) (*JobInfo, err
 		info.RepoURL = job.Annotations["app-platform-shift.openshift.github.io/repo-url"]
 		info.EPUrl = job.Annotations["app-platform-shift.openshift.github.io/ep-url"]
 		info.BaseBranch = job.Annotations["app-platform-shift.openshift.github.io/base-branch"]
+		info.DesignDocURL = job.Annotations["app-platform-shift.openshift.github.io/design-doc-url"]
+		info.JiraTicket = job.Annotations["app-platform-shift.openshift.github.io/jira-ticket"]
 	}
 
 	return info, nil

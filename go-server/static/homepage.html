@@ -48,7 +48,7 @@
 <body>
 <div class="card">
   <h1>OAPE Operator Feature Developer</h1>
-  <p class="sub">Generate complete operator implementation from an OpenShift Enhancement Proposal</p>
+  <p class="sub">Generate complete operator implementation from an Enhancement Proposal, Design Document, and/or Jira Ticket</p>
 
   <div class="workflow-info">
     <h3>Workflow Overview</h3>
@@ -76,10 +76,24 @@
     </div>
 
     <div class="field-group">
-      <label for="ep_url">Enhancement Proposal PR URL</label>
+      <label for="ep_url">Enhancement Proposal PR URL <span style="color:#888;font-weight:normal">(optional)</span></label>
       <input type="text" id="ep_url" name="ep_url"
-             placeholder="https://github.com/openshift/enhancements/pull/1234" required>
+             placeholder="https://github.com/openshift/enhancements/pull/1234">
       <div class="field-hint">The enhancement proposal that describes the feature</div>
+    </div>
+
+    <div class="field-group">
+      <label for="design_doc_url">Design Document URL <span style="color:#888;font-weight:normal">(optional)</span></label>
+      <input type="text" id="design_doc_url" name="design_doc_url"
+             placeholder="https://gist.github.com/user/gist_id">
+      <div class="field-hint">GitHub Gist with detailed API specifications</div>
+    </div>
+
+    <div class="field-group">
+      <label for="jira_ticket">Jira Ticket <span style="color:#888;font-weight:normal">(optional)</span></label>
+      <input type="text" id="jira_ticket" name="jira_ticket"
+             placeholder="OCPBUGS-12345 or https://issues.redhat.com/browse/OCPBUGS-12345">
+      <div class="field-hint">Jira ticket with requirements and acceptance criteria</div>
     </div>
 
     <button type="submit" id="submitBtn">Start Workflow</button>
@@ -137,10 +151,16 @@ function escapeHtml(text) {
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const epUrl = document.getElementById('ep_url').value.trim();
+  const designDocUrl = document.getElementById('design_doc_url').value.trim();
+  const jiraTicket = document.getElementById('jira_ticket').value.trim();
   const repo  = document.getElementById('repo').value;
   const baseBranch = document.getElementById('base_branch').value.trim();
 
-  if (!epUrl || !repo || !baseBranch) return;
+  if (!repo || !baseBranch) return;
+  if (!epUrl && !designDocUrl && !jiraTicket) {
+    statusEl.innerHTML = '<span class="error">At least one input source is required (EP URL, Design Document, or Jira Ticket)</span>';
+    return;
+  }
 
   btn.disabled = true;
   logEl.style.display = 'none';
@@ -150,7 +170,11 @@ form.addEventListener('submit', async (e) => {
   statusEl.innerHTML = '<span class="spinner"></span> Submitting workflow job\u2026';
 
   try {
-    const body = JSON.stringify({ep_url: epUrl, repo_url: repo, base_branch: baseBranch});
+    const payload = {repo_url: repo, base_branch: baseBranch};
+    if (epUrl) payload.ep_url = epUrl;
+    if (designDocUrl) payload.design_doc_url = designDocUrl;
+    if (jiraTicket) payload.jira_ticket = jiraTicket;
+    const body = JSON.stringify(payload);
     const res = await fetch('/api/v1/workflows', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},

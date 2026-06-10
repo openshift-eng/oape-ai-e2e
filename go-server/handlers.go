@@ -27,12 +27,15 @@ type App struct {
 }
 
 var epURLPattern = regexp.MustCompile(`^https://github\.com/openshift/enhancements/pull/\d+/?$`)
+var gistURLPattern = regexp.MustCompile(`^https://gist\.github(usercontent)?\.com/`)
 
 // CreateWorkflowRequest is the JSON body for POST /api/v1/workflows.
 type CreateWorkflowRequest struct {
-	EPUrl      string `json:"ep_url"`
-	BaseBranch string `json:"base_branch"`
-	RepoURL    string `json:"repo_url"`
+	EPUrl        string `json:"ep_url"`
+	BaseBranch   string `json:"base_branch"`
+	RepoURL      string `json:"repo_url"`
+	DesignDocURL string `json:"design_doc_url,omitempty"`
+	JiraTicket   string `json:"jira_ticket,omitempty"`
 }
 
 // WorkflowSummary is a compact representation for workflow lists.
@@ -55,13 +58,15 @@ type RepoListResponse struct {
 
 // WorkflowDetailResponse for GET /api/v1/workflows/{job_id}.
 type WorkflowDetailResponse struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
-	Message    string `json:"message,omitempty"`
-	CreatedAt  string `json:"createdAt"`
-	RepoURL    string `json:"repoUrl"`
-	EPUrl      string `json:"epUrl"`
-	BaseBranch string `json:"baseBranch"`
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Message      string `json:"message,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	RepoURL      string `json:"repoUrl"`
+	EPUrl        string `json:"epUrl"`
+	BaseBranch   string `json:"baseBranch"`
+	DesignDocURL string `json:"designDocUrl,omitempty"`
+	JiraTicket   string `json:"jiraTicket,omitempty"`
 }
 
 // CreateWorkflowResponse for POST /api/v1/workflows.
@@ -145,13 +150,23 @@ func (a *App) HandleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.EPUrl == "" || req.RepoURL == "" || req.BaseBranch == "" {
-		writeError(w, http.StatusBadRequest, "ep_url, repo_url, and base_branch are required")
+	if req.RepoURL == "" || req.BaseBranch == "" {
+		writeError(w, http.StatusBadRequest, "repo_url and base_branch are required")
 		return
 	}
 
-	if !epURLPattern.MatchString(req.EPUrl) {
+	if req.EPUrl == "" && req.DesignDocURL == "" && req.JiraTicket == "" {
+		writeError(w, http.StatusBadRequest, "at least one input source is required: ep_url, design_doc_url, or jira_ticket")
+		return
+	}
+
+	if req.EPUrl != "" && !epURLPattern.MatchString(req.EPUrl) {
 		writeError(w, http.StatusBadRequest, "ep_url must be a valid OpenShift enhancement PR URL")
+		return
+	}
+
+	if req.DesignDocURL != "" && !gistURLPattern.MatchString(req.DesignDocURL) {
+		writeError(w, http.StatusBadRequest, "design_doc_url must be a valid GitHub Gist URL")
 		return
 	}
 
@@ -172,6 +187,8 @@ func (a *App) HandleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		EPUrl:            req.EPUrl,
 		RepoURL:          req.RepoURL,
 		BaseBranch:       req.BaseBranch,
+		DesignDocURL:     req.DesignDocURL,
+		JiraTicket:       req.JiraTicket,
 		WorkerImage:      a.cfg.WorkerImage,
 		EnvConfigMap:     a.cfg.WorkerEnvConfigMap,
 		GCloudSecret:     a.cfg.GCloudSecretName,
@@ -188,7 +205,7 @@ func (a *App) HandleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created workflow job %s for ep=%s repo=%s base_branch=%s", jobID, req.EPUrl, req.RepoURL, req.BaseBranch)
+	log.Printf("Created workflow job %s for ep=%s design_doc=%s jira=%s repo=%s base_branch=%s", jobID, req.EPUrl, req.DesignDocURL, req.JiraTicket, req.RepoURL, req.BaseBranch)
 	writeJSON(w, http.StatusCreated, CreateWorkflowResponse{
 		ID:     jobID,
 		Status: "pending",
@@ -232,13 +249,15 @@ func (a *App) HandleGetWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, WorkflowDetailResponse{
-		ID:         info.ID,
-		Status:     info.Status,
-		Message:    info.Message,
-		CreatedAt:  info.CreatedAt,
-		RepoURL:    info.RepoURL,
-		EPUrl:      info.EPUrl,
-		BaseBranch: info.BaseBranch,
+		ID:           info.ID,
+		Status:       info.Status,
+		Message:      info.Message,
+		CreatedAt:    info.CreatedAt,
+		RepoURL:      info.RepoURL,
+		EPUrl:        info.EPUrl,
+		BaseBranch:   info.BaseBranch,
+		DesignDocURL: info.DesignDocURL,
+		JiraTicket:   info.JiraTicket,
 	})
 }
 

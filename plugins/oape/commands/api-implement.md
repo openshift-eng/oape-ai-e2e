@@ -1,6 +1,6 @@
 ---
-description: Generate OpenShift controller/reconciler implementation code from an enhancement proposal PR and/or design document, following controller-runtime and operator-sdk conventions
-argument-hint: <enhancement-pr-url> [--design-doc <gist-url>]
+description: Generate OpenShift controller/reconciler implementation code from an enhancement proposal PR, design document, and/or Jira ticket, following controller-runtime and operator-sdk conventions
+argument-hint: <enhancement-pr-url> [--design-doc <gist-url>] [--jira <ticket-key-or-url>]
 ---
 
 ## Name
@@ -16,16 +16,29 @@ oape:api-implement
 
 # Design document only
 /oape:api-implement --design-doc <https://gist.github.com/user/gist_id>
+
+# Jira ticket only
+/oape:api-implement --jira OCPBUGS-12345
+
+# Jira ticket with full URL
+/oape:api-implement --jira https://issues.redhat.com/browse/OCPBUGS-12345
+
+# EP + Jira ticket
+/oape:api-implement <https://github.com/openshift/enhancements/pull/NNNN> --jira OCPBUGS-12345
+
+# All three sources
+/oape:api-implement <https://github.com/openshift/enhancements/pull/NNNN> --design-doc <https://gist.github.com/user/gist_id> --jira OCPBUGS-12345
 ```
 
 ## Description
-The `oape:api-implement` command reads an OpenShift enhancement proposal PR and/or a design document (GitHub Gist), extracts the required implementation logic, and generates complete controller/reconciler code in the correct paths of the current OpenShift operator repository.
+The `oape:api-implement` command reads an OpenShift enhancement proposal PR, a design document (GitHub Gist), and/or a Jira ticket, extracts the required implementation logic, and generates complete controller/reconciler code in the correct paths of the current OpenShift operator repository.
 
 **Input Sources:**
 - **Enhancement Proposal (EP)**: High-level requirements, constraints, and context from an openshift/enhancements PR
 - **Design Document (Gist)**: Detailed implementation specifications including reconciliation workflow, dependent resources, and controller behavior
+- **Jira Ticket**: Specific implementation requirements, acceptance criteria, and component context from a Jira issue
 
-When both sources are provided, the design document takes precedence for implementation details while the EP provides high-level context.
+When multiple sources are provided, precedence is: design document > Jira ticket > EP. The design document takes precedence for exact implementation details, the Jira ticket provides specific requirements and acceptance criteria, and the EP provides high-level context.
 
 This command generates **production-ready code with zero TODOs** by:
 1. Parsing the input sources for explicit business logic requirements
@@ -47,13 +60,27 @@ All prechecks must pass before proceeding. If ANY precheck fails, STOP immediate
 
 #### Precheck 1 — Parse and Validate Input Arguments
 
-The command accepts an Enhancement Proposal URL and/or a design document (gist) URL. At least one must be provided.
+The command accepts an Enhancement Proposal URL, a design document (gist) URL, and/or a Jira ticket key/URL. At least one must be provided.
 
 ```bash
 ARGS="$ARGUMENTS"
 ENHANCEMENT_PR=""
 DESIGN_DOC_URL=""
+JIRA_INPUT=""
+JIRA_TICKET_KEY=""
 ENHANCEMENT_PR_NUMBER=""
+
+# Extract --jira argument if present
+if echo "$ARGS" | grep -q '\-\-jira'; then
+  JIRA_INPUT=$(echo "$ARGS" | sed -n 's/.*--jira[[:space:]]\+\([^[:space:]]\+\).*/\1/p')
+  ARGS=$(echo "$ARGS" | sed 's/--jira[[:space:]]\+[^[:space:]]\+//')
+  # Guard against accidental flag-as-value (e.g., --jira --design-doc)
+  if echo "$JIRA_INPUT" | grep -qE '^--'; then
+    echo "PRECHECK FAILED: --jira value looks like a flag: $JIRA_INPUT"
+    echo "Provide a ticket key (e.g., OCPBUGS-12345) or URL after --jira."
+    exit 1
+  fi
+fi
 
 # Extract --design-doc argument if present
 if echo "$ARGS" | grep -q '\-\-design-doc'; then
@@ -61,20 +88,24 @@ if echo "$ARGS" | grep -q '\-\-design-doc'; then
   # Remove --design-doc and its value from ARGS to get EP URL
   ENHANCEMENT_PR=$(echo "$ARGS" | sed 's/--design-doc[[:space:]]\+[^[:space:]]\+//' | xargs)
 else
-  ENHANCEMENT_PR="$ARGS"
+  ENHANCEMENT_PR=$(echo "$ARGS" | xargs)
 fi
 
 # Validate at least one input is provided
-if [ -z "$ENHANCEMENT_PR" ] && [ -z "$DESIGN_DOC_URL" ]; then
+if [ -z "$ENHANCEMENT_PR" ] && [ -z "$DESIGN_DOC_URL" ] && [ -z "$JIRA_INPUT" ]; then
   echo "PRECHECK FAILED: No input provided."
   echo "Usage:"
-  echo "  /oape:api-implement <EP_URL> [--design-doc <GIST_URL>]"
+  echo "  /oape:api-implement <EP_URL> [--design-doc <GIST_URL>] [--jira <TICKET_KEY_OR_URL>]"
   echo "  /oape:api-implement --design-doc <GIST_URL>"
+  echo "  /oape:api-implement --jira OCPBUGS-12345"
+  echo "  /oape:api-implement --jira https://issues.redhat.com/browse/OCPBUGS-12345"
   echo ""
   echo "Examples:"
   echo "  /oape:api-implement https://github.com/openshift/enhancements/pull/1234"
   echo "  /oape:api-implement https://github.com/openshift/enhancements/pull/1234 --design-doc https://gist.github.com/user/abc123"
   echo "  /oape:api-implement --design-doc https://gist.github.com/user/abc123"
+  echo "  /oape:api-implement --jira OCPBUGS-12345"
+  echo "  /oape:api-implement https://github.com/openshift/enhancements/pull/1234 --jira OCPBUGS-12345"
   exit 1
 fi
 
@@ -89,7 +120,7 @@ if [ -n "$ENHANCEMENT_PR" ]; then
   ENHANCEMENT_PR_NUMBER=$(echo "$ENHANCEMENT_PR" | grep -oE '[0-9]+$')
   echo "Enhancement PR #$ENHANCEMENT_PR_NUMBER validated."
 else
-  echo "No Enhancement PR provided. Using design document only."
+  echo "No Enhancement PR provided."
 fi
 
 # Validate Design Document URL if provided
@@ -106,13 +137,41 @@ if [ -n "$DESIGN_DOC_URL" ]; then
   fi
   echo "Design document URL validated: $DESIGN_DOC_URL"
 else
-  echo "No design document provided. Using Enhancement PR only."
+  echo "No design document provided."
+fi
+
+# Validate and parse Jira ticket if provided
+if [ -n "$JIRA_INPUT" ]; then
+  # If input is a URL, extract the ticket key
+  if echo "$JIRA_INPUT" | grep -qE '^https?://'; then
+    JIRA_TICKET_KEY=$(echo "$JIRA_INPUT" | sed -n 's|.*/browse/\([A-Z][A-Z0-9]*-[0-9][0-9]*\).*|\1|p')
+    if [ -z "$JIRA_TICKET_KEY" ]; then
+      echo "PRECHECK FAILED: Could not extract ticket key from Jira URL."
+      echo "Expected format: https://issues.redhat.com/browse/PROJECT-12345"
+      echo "Got: $JIRA_INPUT"
+      exit 1
+    fi
+  else
+    JIRA_TICKET_KEY="$JIRA_INPUT"
+  fi
+
+  # Validate ticket key format (PROJECT-NUMBER)
+  if ! echo "$JIRA_TICKET_KEY" | grep -qE '^[A-Z][A-Z0-9]+-[0-9]+$'; then
+    echo "PRECHECK FAILED: Invalid Jira ticket key format."
+    echo "Expected format: PROJECT-12345 (e.g., OCPBUGS-12345, RFE-1234)"
+    echo "Got: $JIRA_TICKET_KEY"
+    exit 1
+  fi
+  echo "Jira ticket key validated: $JIRA_TICKET_KEY"
+else
+  echo "No Jira ticket provided."
 fi
 
 echo ""
 echo "=== Input Sources ==="
 [ -n "$ENHANCEMENT_PR" ] && echo "  Enhancement PR: $ENHANCEMENT_PR"
 [ -n "$DESIGN_DOC_URL" ] && echo "  Design Document: $DESIGN_DOC_URL"
+[ -n "$JIRA_TICKET_KEY" ] && echo "  Jira Ticket: $JIRA_TICKET_KEY"
 echo "====================="
 ```
 
@@ -247,7 +306,60 @@ else
 fi
 ```
 
-#### Precheck 6 — Verify API Types Exist
+#### Precheck 6 — Verify Jira Ticket is Accessible (if provided)
+
+```bash
+JIRA_SUMMARY=""
+
+if [ -n "$JIRA_TICKET_KEY" ]; then
+  echo "Verifying Jira ticket $JIRA_TICKET_KEY is accessible..."
+
+  JIRA_URL="${JIRA_URL:-https://issues.redhat.com}"
+
+  # Check if JIRA_PERSONAL_TOKEN is set
+  if [ -z "$JIRA_PERSONAL_TOKEN" ]; then
+    echo "PRECHECK FAILED: JIRA_PERSONAL_TOKEN environment variable is not set."
+    echo ""
+    echo "Setup instructions:"
+    echo "  1. Visit: https://issues.redhat.com/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens"
+    echo "  2. Create a personal access token"
+    echo "  3. Export it: export JIRA_PERSONAL_TOKEN=\"your_token_here\""
+    exit 1
+  fi
+
+  # Fetch issue summary to verify accessibility
+  JIRA_RESPONSE=$(curl -sS -w "\n%{http_code}" \
+    -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" \
+    -H "Accept: application/json" \
+    "$JIRA_URL/rest/api/2/issue/$JIRA_TICKET_KEY?fields=summary")
+
+  JIRA_HTTP_CODE=$(echo "$JIRA_RESPONSE" | tail -1)
+  JIRA_BODY=$(echo "$JIRA_RESPONSE" | sed '$d')
+
+  if [ "$JIRA_HTTP_CODE" = "200" ]; then
+    JIRA_SUMMARY=$(echo "$JIRA_BODY" | jq -r '.fields.summary // "Untitled"')
+    echo "Jira ticket verified: $JIRA_TICKET_KEY - $JIRA_SUMMARY"
+  elif [ "$JIRA_HTTP_CODE" = "401" ]; then
+    echo "PRECHECK FAILED: Jira authentication failed (HTTP 401)."
+    echo "Your JIRA_PERSONAL_TOKEN may be invalid or expired."
+    exit 1
+  elif [ "$JIRA_HTTP_CODE" = "403" ]; then
+    echo "PRECHECK FAILED: Access denied to Jira ticket $JIRA_TICKET_KEY (HTTP 403)."
+    exit 1
+  elif [ "$JIRA_HTTP_CODE" = "404" ]; then
+    echo "PRECHECK FAILED: Jira ticket $JIRA_TICKET_KEY not found (HTTP 404)."
+    echo "Verify the ticket key and check: $JIRA_URL/browse/$JIRA_TICKET_KEY"
+    exit 1
+  else
+    echo "PRECHECK FAILED: Unable to access Jira ticket $JIRA_TICKET_KEY (HTTP $JIRA_HTTP_CODE)."
+    exit 1
+  fi
+else
+  echo "Skipping Jira ticket validation (not provided)."
+fi
+```
+
+#### Precheck 7 — Verify API Types Exist
 
 ```bash
 echo "Checking if API types exist in the repository..."
@@ -265,7 +377,7 @@ echo "Found API types:"
 echo "$API_TYPES" | head -10
 ```
 
-#### Precheck 7 — Verify Clean Working Tree (Warning)
+#### Precheck 8 — Verify Clean Working Tree (Warning)
 
 ```bash
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -395,7 +507,7 @@ I will apply the correct patterns based on detected type.
 
 ### Phase 3: Fetch and Parse Input Sources
 
-Fetch content from all provided input sources (Enhancement Proposal and/or Design Document).
+Fetch content from all provided input sources (Enhancement Proposal, Design Document, and/or Jira Ticket).
 
 #### 3.1 Fetch Enhancement Proposal (if provided)
 
@@ -440,17 +552,60 @@ If the `gh api` command fails, try fetching via curl:
 curl -sL "https://api.github.com/gists/$GIST_ID" | jq -r '.files | to_entries[] | "=== FILE: \(.key) ===\n\(.value.content)\n"'
 ```
 
-#### 3.3 Extract Structured Requirements
+#### 3.3 Fetch Jira Ticket (if provided)
+
+```bash
+if [ -n "$JIRA_TICKET_KEY" ]; then
+  echo "Fetching Jira ticket $JIRA_TICKET_KEY..."
+
+  JIRA_URL="${JIRA_URL:-https://issues.redhat.com}"
+
+  # Fetch full issue details including description, acceptance criteria, components, and linked issues
+  # customfield_12316840 = Target Release, customfield_12319940 = Story Points (Red Hat Jira)
+  curl -sS \
+    -H "Authorization: Bearer $JIRA_PERSONAL_TOKEN" \
+    -H "Accept: application/json" \
+    "$JIRA_URL/rest/api/2/issue/$JIRA_TICKET_KEY?fields=summary,description,components,labels,status,issuetype,issuelinks,fixVersions,customfield_12316840,customfield_12319940"
+fi
+```
+
+From the Jira response, extract:
+- **Summary**: High-level description of the requirement
+- **Description**: Full requirement text (strip Jira wiki markup)
+- **Components**: Affected OpenShift components
+- **Labels**: Relevant labels (e.g., TechPreview, API-change)
+- **Acceptance Criteria**: From description or custom fields — these map to specific controller behaviors
+- **Linked Issues**: Related EPs, bugs (bugs reveal edge cases the controller must handle), or other stories
+- **Fix Versions**: Target OpenShift version — affects feature gating
+
+#### 3.4 Extract Structured Requirements
 
 ```thinking
 I MUST extract structured information from the input source(s). The approach depends on what was provided:
 
-**If BOTH Enhancement Proposal AND Design Document are provided:**
+**Precedence rules (highest to lowest):**
+1. Design Document — exact implementation details
+2. Jira Ticket — specific requirements and acceptance criteria
+3. Enhancement Proposal — high-level context and constraints
+
+**If Design Document, Jira Ticket, AND Enhancement Proposal are all provided:**
+- EP provides high-level context: motivation, constraints, affected components
+- Jira ticket adds specific requirements: acceptance criteria mapping to controller behaviors, component details, fix versions
+- Design Document provides implementation details: reconciliation workflow, dependent resources, controller behavior
+- For conflicts: Design Document > Jira Ticket > EP
+
+**If BOTH Enhancement Proposal AND Design Document are provided (no Jira):**
 - The EP provides high-level context: motivation, constraints, affected components
 - The Design Document provides implementation details: reconciliation workflow, dependent resources, controller behavior
 - When both specify the same information, the Design Document takes precedence
 - Extract from EP: component context, FeatureGate requirements, general constraints
 - Extract from Design Document: exact reconciliation steps, dependent resources, status updates, events
+
+**If Jira Ticket is provided (alone or with EP, without Design Document):**
+- Extract from Jira: acceptance criteria that define controller behaviors, component scope, linked bugs revealing edge cases
+- Jira tickets often have specific implementation requirements closer to code-level detail than EPs
+- Check linked issues for additional context (linked EPs, related bugs, stories)
+- Extract from EP (if provided): broader motivation, architectural constraints
 
 **If only Enhancement Proposal is provided:**
 - Extract all requirements from the EP (original behavior)
@@ -458,6 +613,15 @@ I MUST extract structured information from the input source(s). The approach dep
 **If only Design Document is provided:**
 - The Design Document must be comprehensive enough to generate controller code
 - It should specify: API details, reconciliation workflow, dependent resources, status conditions
+
+**If only Jira Ticket is provided:**
+- The ticket must contain enough detail to determine controller behavior
+- If the ticket is sparse (missing description, no acceptance criteria, or lacks implementation details),
+  WARN the user and ask clarifying questions such as:
+  - "What reconciliation steps should the controller perform?"
+  - "What dependent resources should it manage?"
+  - "What status conditions should it report?"
+  Then continue with the combined information
 
 From the combined sources, I will extract the following. For each item, I will search for specific sections, keywords, and patterns.
 
@@ -575,11 +739,12 @@ Based on all above, compute:
 - [ ] Events: create, patch
 
 **Source Merging Rules:**
-When both EP and Design Document are provided:
+When multiple sources are provided, precedence is: Design Document > Jira Ticket > EP.
 1. Design Document takes precedence for implementation-specific details
-2. EP provides context and constraints
-3. If there are conflicts, prefer Design Document specifics
-4. Document any significant conflicts in the output summary
+2. Jira Ticket provides specific requirements, acceptance criteria, and edge cases from linked bugs
+3. EP provides context and constraints
+4. If there are conflicts, prefer higher-precedence source specifics
+5. Document any significant conflicts in the output summary
 
 If ANY required section (A, B, C, F, I) is missing or ambiguous across ALL provided sources, I MUST stop and ask the user for clarification. I will NOT guess.
 ```
@@ -1314,6 +1479,7 @@ After generating all files, provide a comprehensive summary:
 Input Sources:
   Enhancement PR: <url> (if provided)
   Design Document: <gist-url> (if provided)
+  Jira Ticket: <key> - <summary> (if provided)
   Enhancement Title: <title> (if EP provided)
 Operator Type: <controller-runtime | library-go>
 
@@ -1373,8 +1539,9 @@ Cleanup on Deletion:
 
 Feature Gate: <FeatureGateName> (if applicable)
 
-Source Conflicts Resolved: (if both EP and design doc provided)
-  - <item>: Used design doc specification (<reason>)
+Source Conflicts Resolved: (if multiple sources provided)
+  - <item>: Used design doc specification over Jira ticket (<reason>)
+  - <item>: Used Jira acceptance criteria over EP (<reason>)
 
 Next Steps:
   1. Review the generated controller code
@@ -1391,22 +1558,24 @@ Next Steps:
 
 The command MUST FAIL and STOP immediately if ANY of the following are true:
 
-1. **No input provided**: Neither an enhancement PR URL nor a design document URL was provided
+1. **No input provided**: Neither an enhancement PR URL, design document URL, nor Jira ticket key was provided
 2. **Invalid PR URL**: The provided EP URL is not a valid `openshift/enhancements` PR
 3. **Invalid gist URL**: The provided design document URL is not a valid GitHub Gist
-4. **Missing tools**: `gh`, `go`, `git`, or `make` not installed
-5. **Not authenticated**: `gh` not authenticated
-6. **Not an operator repo**: No go.mod or not a recognized operator type
-7. **No API types**: API types don't exist (run `/oape:api-generate` first)
-8. **Input not accessible**: Enhancement PR or design document cannot be fetched
-9. **No implementation requirements**: Input sources don't describe controller behavior
-10. **Ambiguous requirements**: Cannot determine reconciliation workflow from input sources
-11. **Unsupported framework**: Repository does not use controller-runtime or library-go
+4. **Invalid Jira ticket**: The provided Jira ticket key does not match PROJECT-NUMBER format
+5. **Missing tools**: `gh`, `go`, `git`, or `make` not installed
+6. **Not authenticated**: `gh` not authenticated
+7. **Not an operator repo**: No go.mod or not a recognized operator type
+8. **No API types**: API types don't exist (run `/oape:api-generate` first)
+9. **Input not accessible**: Enhancement PR, design document, or Jira ticket cannot be fetched
+10. **Jira token missing**: `--jira` was provided but `JIRA_PERSONAL_TOKEN` is not set
+11. **No implementation requirements**: Input sources don't describe controller behavior
+12. **Ambiguous requirements**: Cannot determine reconciliation workflow from input sources
+13. **Unsupported framework**: Repository does not use controller-runtime or library-go
 
 ## Behavioral Rules
 
 1. **Never guess**: If input sources are ambiguous, STOP and ask the user for clarification
-2. **Design document precedence**: When both EP and design document are provided, the design document takes precedence for implementation details
+2. **Source precedence**: When multiple sources are provided, precedence is: design document > Jira ticket > EP for implementation details
 3. **Zero TODOs**: Generate actual implementation code, not placeholders
 4. **Convention over proposal**: Apply framework best practices even if input sources differ
 5. **Match existing patterns**: Replicate patterns from existing controllers in the repo
@@ -1424,16 +1593,22 @@ The command MUST FAIL and STOP immediately if ANY of the following are true:
 
 ## Arguments
 
-- `<enhancement-pr-url>` (optional if design-doc provided): GitHub PR URL to the OpenShift enhancement proposal
+- `<enhancement-pr-url>` (optional if another source provided): GitHub PR URL to the OpenShift enhancement proposal
   - Format: `https://github.com/openshift/enhancements/pull/<number>`
 
-- `--design-doc <gist-url>` (optional if EP provided): GitHub Gist URL containing detailed implementation specifications
+- `--design-doc <gist-url>` (optional if another source provided): GitHub Gist URL containing detailed implementation specifications
   - Supported formats:
     - `https://gist.github.com/username/gist_id`
     - `https://gist.github.com/gist_id`
     - `https://gist.githubusercontent.com/username/gist_id/raw/...`
 
-**At least one input source (EP or design document) must be provided.**
+- `--jira <ticket-key-or-url>` (optional if another source provided): Jira ticket providing specific requirements and acceptance criteria
+  - Supported formats:
+    - Ticket key: `OCPBUGS-12345`, `RFE-1234`, `HOSTEDCP-567`
+    - Full URL: `https://issues.redhat.com/browse/OCPBUGS-12345`
+  - Requires `JIRA_PERSONAL_TOKEN` environment variable
+
+**At least one input source (EP, design document, or Jira ticket) must be provided.**
 
 ## Design Document Expected Format
 
@@ -1480,6 +1655,8 @@ When using a design document for controller implementation, it should contain:
 - **go** — Go toolchain installed
 - **git** — Git installed
 - **make** — Make installed
+- **jq** — JSON processor (for parsing Jira API responses)
+- **JIRA_PERSONAL_TOKEN** — Personal access token for Jira REST API (required when using `--jira`)
 - Must be run from within an OpenShift operator repository
 - API types MUST exist (run `/oape:api-generate` first)
 
