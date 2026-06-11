@@ -1,0 +1,84 @@
+name: periodic-pr-agent
+
+on:
+  schedule:
+    # Every hour, weekdays, 08:00–23:00 UTC
+    - cron: '0 8-23 * * 1-5'
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        type: string
+        required: false
+        description: 'PR URL to monitor (leave empty for periodic sweep of all repos)'
+      dry_run:
+        type: boolean
+        default: false
+        description: 'Run in dry-run mode (no file modifications, commits, or pushes)'
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || inputs.pr_url || 'periodic' }}
+  cancel-in-progress: false
+
+jobs:
+  pr-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.OAPE_APP_ID }}
+          private-key: ${{ secrets.OAPE_APP_PRIVATE_KEY }}
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup Go tools
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOPATH)/bin"
+
+      - name: Run PR Agent
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CLAUDE_CODE_USE_VERTEX: '1'
+          CLOUD_ML_REGION: global
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.number }}"
+            scripts/pr-agent/entrypoint.sh --mode on-demand --pr-url "$PR_URL" --monitor-only
+          elif [[ -n "${{ inputs.pr_url }}" ]]; then
+            scripts/pr-agent/entrypoint.sh --mode on-demand --pr-url "${{ inputs.pr_url }}" --monitor-only
+          else
+            scripts/pr-agent/entrypoint.sh --mode periodic
+          fi
+
+      - name: Upload Audit Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-agent-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/pr-agent-audit-*.jsonl
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-agent-reports-${{ github.run_id }}
+          path: ${{ runner.temp }}/pr-agent-report-*.md
+          retention-days: 30
+          if-no-files-found: ignore
