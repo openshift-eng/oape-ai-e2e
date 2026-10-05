@@ -21,9 +21,10 @@ LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
 def mint_token():
     """Generate a GitHub App installation token."""
     private_key_contents = open(PEM_FILE_PATH, "r").read()
+    now = int(time.time())
     payload = {
-        "iat": int(time.time()),
-        "exp": int(time.time()) + (10 * 30),  # 30 mins
+        "iat": now - 60,          # backdate 60s to tolerate clock skew
+        "exp": now + (9 * 60),    # 9 min — safely under GitHub's 10-min JWT cap
         "iss": APP_ID,
     }
     encoded_jwt = jwt.encode(payload, private_key_contents, algorithm="RS256")

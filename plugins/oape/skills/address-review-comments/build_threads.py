@@ -182,45 +182,6 @@ def group_inline_threads(comments: list[dict]) -> list[list[dict]]:
     return list(roots.values())
 
 
-def merge_proximity_threads(threads: list[list[dict]], max_gap: int = 10) -> list[list[dict]]:
-    """Merge threads on the same file within max_gap lines of each other."""
-    if not threads:
-        return threads
-
-    by_file: dict[str, list[list[dict]]] = {}
-    for thread in threads:
-        path = thread[0].get("path", "")
-        by_file.setdefault(path, []).append(thread)
-
-    merged = []
-    for path, file_threads in by_file.items():
-        if not path:
-            merged.extend(file_threads)
-            continue
-
-        def comment_line(c: dict) -> int:
-            return c.get("line") or c.get("original_line") or 0
-
-        def thread_min_line(t: list[dict]) -> int:
-            return min(comment_line(c) for c in t) if t else 0
-
-        file_threads.sort(key=thread_min_line)
-        current = file_threads[0]
-        current_max_line = max(comment_line(c) for c in current)
-        for thread in file_threads[1:]:
-            next_min_line = thread_min_line(thread)
-            if abs(next_min_line - current_max_line) <= max_gap:
-                current.extend(thread)
-                current_max_line = max(current_max_line, max(comment_line(c) for c in thread))
-            else:
-                merged.append(current)
-                current = thread
-                current_max_line = max(comment_line(c) for c in current)
-        merged.append(current)
-
-    return merged
-
-
 def check_replied(owner: str, repo: str, pr: int, comment_id: int, comment_type: str) -> bool:
     """Check if bot already replied to this comment. Returns True if safe to reply."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -343,8 +304,12 @@ def main():
 
     threads = []
 
+    # NOTE: distinct inline threads are intentionally NOT merged by proximity.
+    # Threads are addressed sequentially (each commit is visible to the next), so
+    # there is no parallel-edit hazard to avoid, and merging unrelated comments on
+    # nearby lines would collapse them into one thread — with "reply once per thread"
+    # that silently leaves a reviewer's request unaddressed.
     inline_threads = group_inline_threads(kept_inline)
-    inline_threads = merge_proximity_threads(inline_threads)
     for thread_comments in inline_threads:
         threads.append(build_thread_output(thread_comments, args.owner, args.repo, args.pr, "inline"))
 

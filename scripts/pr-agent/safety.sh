@@ -36,13 +36,30 @@ BLOCKED_PATTERNS+='|(^|/)Makefile$'
 BLOCKED_PATTERNS+='|rbac/.*\.yaml|clusterrole.*\.yaml'
 BLOCKED_PATTERNS+='|go\.mod$|go\.sum$'
 
+# Relaxed patterns for trivial-generated-files (go.mod/go.sum allowed
+# because make generate legitimately runs go mod tidy)
+BLOCKED_PATTERNS_GENERATED='\.(key|pem|crt|cert|p12|pfx)$'
+BLOCKED_PATTERNS_GENERATED+='|\.env$'
+BLOCKED_PATTERNS_GENERATED+='|credentials\.'
+BLOCKED_PATTERNS_GENERATED+='|(^|/)kubeconfig$'
+BLOCKED_PATTERNS_GENERATED+='|(^|/)Dockerfile$|(^|/)Containerfile$|\.dockerignore$'
+BLOCKED_PATTERNS_GENERATED+='|\.github/workflows|\.tekton/'
+BLOCKED_PATTERNS_GENERATED+='|(^|/)Makefile$'
+BLOCKED_PATTERNS_GENERATED+='|rbac/.*\.yaml|clusterrole.*\.yaml'
+
 # ---------------------------------------------------------------------------
 # check_blocklist — returns 0 (safe) or 1 (blocked)
 #   $1: newline-separated file paths to check
+#   $2: (optional) failure category — "trivial-generated-files" relaxes go.mod/go.sum
 # ---------------------------------------------------------------------------
 check_blocklist() {
   local files="$1"
+  local category="${2:-}"
   local patterns="$BLOCKED_PATTERNS"
+
+  if [[ "$category" == "trivial-generated-files" ]]; then
+    patterns="$BLOCKED_PATTERNS_GENERATED"
+  fi
 
   if [[ -z "$files" ]]; then
     return 0
@@ -57,7 +74,7 @@ check_blocklist() {
 # ---------------------------------------------------------------------------
 # audit_log — append a structured JSONL entry
 #   $1: action  (auto-fix, blocked, skipped, reverted, dry-run, error, info)
-#   $2: category (e.g. review-code-change, review-explanation)
+#   $2: category (trivial-format, trivial-generated-files, review-code-change, etc.)
 #   $3: files   (space-separated list)
 #   $4: commit  (SHA or empty)
 #   $5: outcome (human-readable description)
@@ -107,9 +124,29 @@ increment_commit_count() {
 }
 
 # ---------------------------------------------------------------------------
+# check_diff_size — returns 0 (within limit) or 1 (too large)
+#   Checks staged + unstaged changes against MAX_DIFF_LINES.
+# ---------------------------------------------------------------------------
+check_diff_size() {
+  local diff_lines
+  diff_lines=$(git diff --numstat | awk '{s+=$1+$2} END {print s+0}')
+  # Include untracked files that would be staged
+  local untracked_lines
+  untracked_lines=$(git ls-files --others --exclude-standard -z 2>/dev/null \
+    | xargs -0 wc -l 2>/dev/null | tail -1 | awk '{print $1+0}' || echo 0)
+  diff_lines=$((diff_lines + untracked_lines))
+
+  if [[ "$diff_lines" -gt "$MAX_DIFF_LINES" ]]; then
+    echo "GUARDRAIL: Diff too large (${diff_lines} lines > ${MAX_DIFF_LINES} limit)" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # gh_retry — retry a command with exponential backoff
 #   All arguments are passed through as the command to execute.
-#   Retries 3 times with 5s / 15s backoff.
+#   Retries 3 times at 5s / 15s / 45s intervals.
 # ---------------------------------------------------------------------------
 gh_retry() {
   local retries=3 delay=5

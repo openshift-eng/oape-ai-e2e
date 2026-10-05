@@ -93,7 +93,7 @@ Analyzes a Jira Request for Enhancement (RFE) and generates a structured breakdo
 **Typical Workflow:**
 ```shell
 # Clone the operator repository (if not already cloned)
-/oape:init cert-manager-operator
+/oape:init https://github.com/openshift/cert-manager-operator main
 
 # Generate the API types
 /oape:api-generate https://github.com/openshift/enhancements/pull/1234
@@ -192,6 +192,48 @@ Generates e2e test artifacts for any OpenShift operator repository by discoverin
 - Operators with in-repo API types or external types from openshift/api
 
 See [e2e-test-generator/](e2e-test-generator/) for fixture templates and pattern documentation.
+
+---
+
+### `/oape:implement-review-fixes`
+
+Automatically applies code fixes from a review report produced by `/oape:review`, prioritized by severity.
+
+**Usage:**
+```shell
+/oape:implement-review-fixes <review_report_json>
+```
+
+**What it does:**
+1. **Parse** -- Extracts the `issues` array from the review report JSON.
+2. **Sort** -- Orders issues by severity (CRITICAL first).
+3. **Apply** -- Applies each suggested fix to the codebase.
+4. **Verify** -- Confirms the build still passes after each fix.
+5. **Report** -- Summarizes which fixes were applied and which failed.
+
+This command is invoked automatically at the end of `/oape:review` when the report contains issues. It can also be run standalone.
+
+---
+
+### `/oape:pr-agent`
+
+Monitors a PR's CI status, classifies failures deterministically, and generates a structured Markdown status report posted as a PR comment.
+
+**Usage:**
+```shell
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123 --dry-run
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123 --monitor-only
+```
+
+**What it does:**
+1. **Prechecks** -- Validates the PR URL format, required tools (`gh`), and GitHub authentication.
+2. **Repo Validation** -- Confirms the PR's repository is in the allowed list (`deploy/config/team-repos.csv`).
+3. **CI Monitoring** -- Runs `scripts/pr-agent/entrypoint.sh` which fetches CI check status via `gh pr checks`, collects failure logs from Prow GCS and GitHub Actions.
+4. **Classification** -- Classifies failures deterministically via regex patterns (trivial-format, trivial-lint, trivial-import, trivial-generated-files, build-error, test-failure, infra-flake, unknown).
+5. **Reporting** -- Generates a structured Markdown report with pass/fail summary, failure categories, and recommended actions. Posts as a PR comment (unless `--dry-run`).
+
+**Note:** This is the interactive/developer entry point. The Prow presubmit (`oape-ci-monitor`) invokes `monitor.sh` and `dispatch.sh` directly.
 
 ## Prerequisites
 

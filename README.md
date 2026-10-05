@@ -64,7 +64,7 @@ The following tools must be installed and available on your system:
 - **GitHub CLI (`gh`)**: [cli.github.com](https://cli.github.com/)
 - **make**: eg. `make generate`, `make build`, etc.
 
-The container image used in [Dockerfile](./Dockerfile) already adds these dependencies, but you need to manage the credentials inside the container.
+The container images in [images/](./images/) already add these dependencies, but you need to manage the credentials inside the container.
 
 ### Optional
 
@@ -113,16 +113,16 @@ ln -s oape-ai-e2e ~/.cursor/commands/oape-ai-e2e
 
 | Plugin | Description | Commands |
 | ------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| **[oape](plugins/oape/)** | AI-driven OpenShift operator development tools | `/oape:init`, `/oape:api-generate`, `/oape:api-generate-tests`, `/oape:api-implement`, `/oape:analyze-rfe`, `/oape:e2e-generate`, `/oape:predict-regressions`, `/oape:review`, `/oape:implement-review-fixes` |
+| **[oape](plugins/oape/)** | AI-driven OpenShift operator development tools | `/oape:init`, `/oape:api-generate`, `/oape:api-generate-tests`, `/oape:api-implement`, `/oape:analyze-rfe`, `/oape:e2e-generate`, `/oape:predict-regressions`, `/oape:review`, `/oape:implement-review-fixes`, `/oape:pr-agent` |
 
 ## Commands
 
 ### `/oape:init` -- Clone an Operator Repository
 
-Clones an allowed OpenShift operator repository by short name into the current directory.
+Clones an allowed OpenShift operator repository into the current directory and checks out the specified base branch.
 
 ```shell
-/oape:init cert-manager-operator
+/oape:init https://github.com/openshift/cert-manager-operator main
 ```
 
 ### `/oape:api-generate` -- Generate API Types from Enhancement Proposal
@@ -189,13 +189,23 @@ Performs a production-grade code review that verifies code changes against Jira 
 Automatically applies code fixes from a review report.
 
 ```shell
-/oape:implement-review-fixes <report-path>
+/oape:implement-review-fixes <review_report_json>
+```
+
+### `/oape:pr-agent` -- Monitor PR CI Status and Triage Failures
+
+Monitors a PR's CI checks, classifies failures deterministically, and posts a structured Markdown report as a PR comment.
+
+```shell
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123 --dry-run
+/oape:pr-agent https://github.com/openshift/cert-manager-operator/pull/123 --monitor-only
 ```
 
 **Typical workflow:**
 ```shell
 # Step 1: Clone the operator repository
-/oape:init cert-manager-operator
+/oape:init https://github.com/openshift/cert-manager-operator main
 
 # Step 2: Generate API types
 /oape:api-generate https://github.com/openshift/enhancements/pull/1234
@@ -219,10 +229,12 @@ Automatically applies code fixes from a review report.
 
 ```shell
 podman build -t quay.io/your-username/oape-ai:agent-worker -f images/agent-worker.Dockerfile .
+podman build -t quay.io/your-username/oape-ai:ci-monitor -f images/ci-monitor.Dockerfile .
 podman build -t quay.io/your-username/oape-ai:gh-token-minter -f images/gh-token-minter.Dockerfile .
 podman build -t quay.io/your-username/oape-ai:go-server -f images/go-server.Dockerfile .
 
 podman push quay.io/your-username/oape-ai:agent-worker
+podman push quay.io/your-username/oape-ai:ci-monitor
 podman push quay.io/your-username/oape-ai:gh-token-minter
 podman push quay.io/your-username/oape-ai:go-server
 ```

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Source shared safety guardrails
-# shellcheck source=safety.sh
+# shellcheck source=scripts/pr-agent/safety.sh
 source "$SCRIPT_DIR/safety.sh"
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,17 @@ source "$SCRIPT_DIR/safety.sh"
 BOT_USER="${BOT_USER:-openshift-app-platform-shift-bot}"
 DRY_RUN="${DRY_RUN:-false}"
 OAPE_ROOT="${OAPE_ROOT:-$REPO_ROOT}"
-PLUGINS_DIR="${PLUGINS_DIR:-${OAPE_ROOT}/plugins/oape/skills}"
+# PLUGINS_DIR resolution: local checkouts keep plugins under the repo root, but the
+# container images (ci-monitor / review-handler) COPY plugins to /plugins. Probe the
+# repo-relative path first, then fall back to the container location so build_threads.py
+# and the SKILL.md files are found in both environments.
+if [[ -z "${PLUGINS_DIR:-}" ]]; then
+  if [[ -d "${OAPE_ROOT}/plugins/oape/skills" ]]; then
+    PLUGINS_DIR="${OAPE_ROOT}/plugins/oape/skills"
+  else
+    PLUGINS_DIR="/plugins/oape/skills"
+  fi
+fi
 SKIP_USERS="${SKIP_USERS:-openshift-ci,openshift-bot,dependabot,codecov,sonarcloud}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 
@@ -118,26 +128,34 @@ clone_and_checkout() {
 
   if [[ -d "$workdir/.git" ]]; then
     cd "$workdir"
-    git pull --ff-only 2>/dev/null || true
+    if ! git pull --ff-only 2>/dev/null; then
+      echo "[review] Fast-forward failed (likely force-push), resetting to remote HEAD"
+      git fetch origin 2>/dev/null || true
+      git reset --hard "origin/$(git branch --show-current)" 2>/dev/null || true
+    fi
   else
     gh_retry gh repo clone "${owner}/${repo}" "$workdir" -- --filter=blob:none --single-branch
     cd "$workdir"
-    gh pr checkout "$pr_number"
+    gh pr checkout "$pr_number" --repo "${owner}/${repo}"
     git config user.name "$BOT_USER"
     git config user.email "267347085+${BOT_USER}@users.noreply.github.com"
+  fi
 
+  # Configure the push remote on EVERY invocation. PUSH_REMOTE is a per-process
+  # variable and the fork/token setup lives only in git config, so a reused
+  # (cached) workdir would otherwise fall back to an unauthenticated origin
+  # pointing at the base repo — wrong for fork-based PRs.
+  local head_repo
+  head_repo=$(gh pr view "$pr_number" --repo "${owner}/${repo}" --json headRepository,headRepositoryOwner \
+    -q '"\(.headRepositoryOwner.login)/\(.headRepository.name)"' 2>/dev/null || echo "${owner}/${repo}")
+  if [[ "$head_repo" != "${owner}/${repo}" ]]; then
     # For fork-based PRs, push to the fork (head repo) via a separate remote
-    local head_repo
-    head_repo=$(gh pr view "$pr_number" --repo "${owner}/${repo}" --json headRepository,headRepositoryOwner \
-      -q '"\(.headRepositoryOwner.login)/\(.headRepository.name)"' 2>/dev/null || echo "${owner}/${repo}")
-    if [[ "$head_repo" != "${owner}/${repo}" ]]; then
-      git remote add fork "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git" 2>/dev/null || \
-        git remote set-url fork "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git"
-      PUSH_REMOTE="fork"
-    else
-      git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git"
-      PUSH_REMOTE="origin"
-    fi
+    git remote add fork "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git" 2>/dev/null || \
+      git remote set-url fork "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git"
+    PUSH_REMOTE="fork"
+  else
+    git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${head_repo}.git"
+    PUSH_REMOTE="origin"
   fi
 }
 
@@ -162,6 +180,17 @@ address_thread() {
   fi
 
   local check_replied="${PLUGINS_DIR}/address-review-comments/check_replied.py"
+
+  # Map the thread type to check_replied.py's --type choices. The model must NOT
+  # guess this: passing e.g. "--type inline" is an invalid argparse choice (exit 2),
+  # which the prompt treats as "proceed (may post)" and silently breaks reply dedup.
+  local check_type
+  case "$thread_type" in
+    inline) check_type="review_comment" ;;
+    review) check_type="review_summary" ;;
+    issue)  check_type="issue_comment" ;;
+    *)      check_type="review_comment" ;;
+  esac
 
   # Check commit limit — if reached, Claude can still post explanation-only replies
   local pr_commits commit_limit_note=""
@@ -190,7 +219,8 @@ INSTRUCTIONS:
 - Reply exactly once per thread. End every reply with:
 ---
 *AI-assisted response via Claude Code*
-- Before posting any reply, run: python3 ${check_replied} ${OWNER} ${REPO} ${PR_NUMBER} <comment_id> --type <type>
+- Before posting any reply, run exactly: python3 ${check_replied} ${OWNER} ${REPO} ${PR_NUMBER} ${thread_id} --type ${check_type}
+  Do NOT change the ID or --type value above; they are pre-resolved for this thread.
   Exit 1 = do NOT post (already replied).
   Exit 2 = error; proceed with caution (may post if no duplicate is visible).
 - If unsure about the requested change, explain your uncertainty instead of guessing.
@@ -356,8 +386,12 @@ main() {
   total_commits=$(cat "${RUNNER_TEMP:-/tmp}/pr-review-commits-${PR_NUMBER}.txt" 2>/dev/null || echo 0)
   if [[ "$total_commits" -gt 0 ]]; then
     echo "[review] Rebasing onto latest remote before push..."
+    # Use the PR's real head branch name (falling back to the local branch). gh pr
+    # checkout may name the LOCAL branch differently on a collision, which would make
+    # the fetch/rebase target a missing remote ref.
     local branch_name
-    branch_name=$(git branch --show-current)
+    branch_name=$(gh pr view "$PR_NUMBER" --repo "${OWNER}/${REPO}" --json headRefName -q .headRefName 2>/dev/null || echo "")
+    branch_name="${branch_name:-$(git branch --show-current)}"
     local push_remote="${PUSH_REMOTE:-origin}"
     git fetch "$push_remote" "$branch_name" 2>/dev/null || true
     if ! git rebase "${push_remote}/${branch_name}" 2>/dev/null; then
@@ -371,7 +405,7 @@ main() {
       return 1
     fi
     echo "[review] Pushing ${total_commits} commit(s)..."
-    if ! git push "$push_remote" HEAD; then
+    if ! git push "$push_remote" "HEAD:${branch_name}"; then
       echo "[review] Push failed — remote may have diverged, skipping push" >&2
       echo "[review] WARNING: ${total_commits} commit(s) not pushed — human intervention needed" >&2
       audit_log "push-failed" "review-code-change" "" "" "push failed for ${total_commits} commit(s)"
